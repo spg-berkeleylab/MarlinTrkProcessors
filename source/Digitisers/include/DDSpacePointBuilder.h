@@ -1,14 +1,18 @@
 #ifndef DDSpacePointBuilder_h
 #define DDSpacePointBuilder_h 1
 
-#include "marlin/Processor.h"
-#include "lcio.h"
+// Standard
 #include <string>
+#include <tuple>
 #include <map>
-#include <EVENT/TrackerHit.h>
-#include <EVENT/TrackerHitPlane.h>
-#include <IMPL/TrackerHitImpl.h>
 
+// k4FWCore & EDM4HEP
+#include <k4FWCore/Transformer.h>
+#include <edm4hep/TrackerHit.h>
+#include <edm4hep/TrackerHitPlane.h>
+#include <edm4hep/MutableTrackerHitPlane.h>
+
+// CLHEP
 #include "CLHEP/Vector/ThreeVector.h"
 #include "CLHEP/Vector/Rotation.h"
 
@@ -20,13 +24,6 @@
 #include "DDRec/SurfaceManager.h"
 #include "DDRec/SurfaceHelper.h"
 #include "DD4hep/DD4hepUnits.h"
-
-using namespace lcio ;
-using namespace marlin ;
-
-
-
-
 
 /** ================= FTD Space Point Builder =================
  * 
@@ -60,62 +57,33 @@ using namespace marlin ;
  * @param SimHitSpacePointRelCollection The name of the SpacePoint SimTrackerHit relation output collection <br>
  * (default name VTXTrackerHitRelations) <br>
  * 
- * @author Robin Glattauer HEPHY, Vienna
+ * @author Robin Glattauer HEPHY, Vienna, Samuel Ferraro
  *
  */
-class DDSpacePointBuilder : public Processor {
-  
- public:
-  
-  virtual Processor*  newProcessor() { return new DDSpacePointBuilder ; }
-  
-  
-  DDSpacePointBuilder() ;
+class DDSpacePointBuilder : public k4FWCore::MulitTransformer<std::tuple<
+		edm4hep::TrackerHitCollection, 
+		edm4hep::TrackerHitSimTrackerHitLinkCollection>(
+		const edm4hep::TrackerHitCollection &,
+		const edm4hep::TrackerHitSimTrackerHitLinkCollection &)> {
+public:
+  DDSpacePointBuilder(const std::string& name, ISvcLocator* svcLoc);
   
   /** Called at the begin of the job before anything is read.
    * Use to initialize the processor, e.g. book histograms.
    */
-  virtual void init() ;
-  
-  /** Called for every run.
-   */
-  virtual void processRunHeader( LCRunHeader* run ) ;
+  StatusCode initialize();
   
   /** Called for every event - the working horse.
    */
-  virtual void processEvent( LCEvent * evt ) ; 
-  
-  
-  virtual void check( LCEvent * evt ) ; 
-  
+  std::tuple<edm4hep::TrackerHitCollection, edm4hep::TrackerHitSimTrackerHitLinkCollection> operator(
+	const edm4hep::TrackerHitCollection& inputHits,
+	const edm4hep::TrackerHitSimTrackerHitLinkCollection& inputRels) const;
   
   /** Called after data processing for clean up.
    */
-  virtual void end() ;
-  
-
-  
+  StatusCode finalize(); 
   
  protected:
-
-
-
-  /** Input collection name.
-  */
-  std::string _TrackerHitCollection;
-
-  /** Input relation collection name.
-   */
-  std::string _TrackerHitSimHitRelCollection;
-  
-  /** Output collection name.
-  */
-  std::string _SpacePointsCollection;
-  
-  /** Output relations collection name.
-   */
-  std::string _relColName;
-
   /** Calculates the 2 dimensional crossing point of two lines.
    * Each line is specified by a point (x,y) and a direction vector (ex,ey).
    * 
@@ -176,7 +144,7 @@ class DDSpacePointBuilder : public Processor {
   
   /** @return a spacepoint (in the form of a TrackerHitImpl* ) created from two TrackerHitPlane* which stand for si-strips */
 
-  TrackerHitImpl* createSpacePoint( TrackerHitPlane* a , TrackerHitPlane* b, double stripLength );
+  edm4hep::MutableTrackerHitPlane* createSpacePoint(edm4hep::TrackerHitPlane* a , edm4hep::TrackerHitPlane* b, double stripLength );
   
   /** @return the CellID0s of the sensors that are back to back to a given front sensor. If the given sensor
    * is in the back itself or has no corresponding sensor(s) on the back the vector will be empty.
@@ -194,30 +162,24 @@ class DDSpacePointBuilder : public Processor {
   
   /** @return information about the contents of the passed CellID0 */ 
   std::string getCellID0Info( int cellID0 );
- 
 
-  int _nRun ;
-  int _nEvt ;
+  unsigned m_nOutOfBoundary;
+  unsigned m_nStripsTooParallel;
+  unsigned m_nPlanesNotParallel;
 
-  unsigned _nOutOfBoundary;
-  unsigned _nStripsTooParallel;
-  unsigned _nPlanesNotParallel;
+  float m_nominal_vertex_x;
+  float m_nominal_vertex_y;
+  float m_nominal_vertex_z;
 
-  float _nominal_vertex_x;
-  float _nominal_vertex_y;
-  float _nominal_vertex_z;
+  CLHEP::Hep3Vector m_nominal_vertex;
 
-  CLHEP::Hep3Vector _nominal_vertex;
+  Gaudi::Property<float> m_striplength_tolerance{this, "StriplengthTolerance", float(0.1), "Tolerance added to the strip length when calculating strip hit intersections."};
 
-  float _striplength_tolerance;
+  Gaudi::Property<double> m_striplength{this, "StripLength", double(0.0), "The length of the strips of the subdetector in mm."};
+  Gaudi::Property<std::string> m_subDetName{this, "SubDetectorName", std::string("SIT"), "Name of sub detector."};
 
-  double _striplength ;
-  std::string _subDetName ;
-
-  //dd4hep::Detector& lcdd;
-  const dd4hep::rec::SurfaceMap* surfMap ;
-  
-} ;
+  const dd4hep::rec::SurfaceMap* surfMap;  
+};
 
 #endif
 

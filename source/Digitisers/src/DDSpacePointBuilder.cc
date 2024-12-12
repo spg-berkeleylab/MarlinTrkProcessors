@@ -1,104 +1,39 @@
 #include "DDSpacePointBuilder.h"
 
-#include "EVENT/TrackerHit.h"
-#include "EVENT/TrackerHitPlane.h"
-#include "EVENT/LCCollection.h"
-#include "EVENT/SimTrackerHit.h"
-#include "IMPL/LCCollectionVec.h"
-#include "IMPL/TrackerHitImpl.h"
-#include "IMPL/TrackerHitPlaneImpl.h"
-#include "IMPL/LCFlagImpl.h"
-#include "IMPL/LCRelationImpl.h"
-#include "UTIL/LCRelationNavigator.h"
+// EDM4HEP
+#include <edm4hep/TrackerHit.h>
+#include <edm4hep/TrackerHitPlane.h>
+#include <edm4hep/SimTrackerHit.h>
+#include <edm4hep/TrackerHitSimTrackerHitLink.h>
+#include <edm4hep/MutableTrackerHit.h>
+#include <edm4hep/MutableTrackerHitPlane.h>
 
-
-#include "marlin/VerbosityLevels.h"
-#include "marlin/Global.h"
-#include "UTIL/LCTrackerConf.h"
-#include <UTIL/ILDConf.h>
-
+// DD4HEP
 #include "DDRec/DetectorData.h"
 
-//FIXME:SJA: if we want the surface store to be filled we need to create an instance of MarlinTrk implemented with KalTest/KalDet
-#include "MarlinTrk/Factory.h"
-
+// CLHEP
 #include "CLHEP/Matrix/SymMatrix.h"
 #include "CLHEP/Matrix/Matrix.h"
 
+// Standard
 #include <cmath>
 #include <sstream>
 
-using namespace lcio ;
-using namespace marlin ;
-
-DDSpacePointBuilder aDDSpacePointBuilder ;
 
 
-DDSpacePointBuilder::DDSpacePointBuilder() : Processor("DDSpacePointBuilder") {
-
-   // modify processor description
-   _description = "DDSpacePointBuilder combine si-strip measurements into 3D spacepoints (1TrackerHitPlanar+1TrackHitPlanar = 1 TrackerHit), that can be used by reconstruction" ;
+DECLARE_COMPONENT(DDSpacePointBuilder);
 
 
-   // register steering parameters: name, description, class-variable, default value
-   registerInputCollection(LCIO::TRACKERHIT,
-                           "TrackerHitCollection",
-                           "TrackerHitCollection",
-                           _TrackerHitCollection,
-                           std::string("FTDTrackerHits")); 
-
-   registerInputCollection(LCIO::LCRELATION,
-                           "TrackerHitSimHitRelCollection",
-                           "The name of the input collection of the relations of the TrackerHits to SimHits",
-                           _TrackerHitSimHitRelCollection,
-                           std::string("FTDTrackerHitRelations")); 
-   
-   registerOutputCollection(LCIO::TRACKERHIT,
-                            "SpacePointsCollection",
-                            "SpacePointsCollection",
-                            _SpacePointsCollection,
-                            std::string("FTDSpacePoints"));
-
-   registerOutputCollection(LCIO::LCRELATION,
-                            "SimHitSpacePointRelCollection",
-                            "Name of the SpacePoint SimTrackerHit relation collection",
-                            _relColName,
-                            std::string("FTDSimHitSpacepointRelations"));
-
-   
-  // YV added
-  registerProcessorParameter("StripLength",
-                             "The length of the strips of the subdetector in mm",
-                             _striplength,
-                             double(0.0));
+DDSpacePointBuilder::DDSpacePointBuilder(const std::string& name, ISvcLocator* svcLoc) : MultiTransformer(name, svcLoc, {
+	KeyValues("TrackerHitCollection", {"FTDTrackerHits"}),
+	KeyValues("TrackerHitSimHitRelCollection", {"FTDTrackerHitRelations"})}, {
+	KeyValues("SpacePointsCollection", {"FTDSpacePoints"}),
+	KeyValues("SimHitSpacePointRelCollection", {"FTDSimHitSpacepointRelations"})
+}) {}
 
 
-  registerProcessorParameter("StriplengthTolerance",
-                             "Tolerance added to the strip length when calculating strip hit intersections",
-                             _striplength_tolerance,
-                             float(0.1));
-
-
-  registerProcessorParameter( "SubDetectorName" , 
-                             "Name of dub detector" ,
-                             _subDetName ,
-                              std::string("SIT") );
-  
-}
-
-
-
-
-void DDSpacePointBuilder::init() { 
-
-  streamlog_out(DEBUG) << "   init called  " << std::endl ;
-
-  // usually a good idea to
-  printParameters() ;
-
-  _nRun = 0 ;
-  _nEvt = 0 ;
-  
+StatusCode DDSpacePointBuilder::initialize() { 
+  /*
   MarlinTrk::IMarlinTrkSystem* trksystem =  MarlinTrk::Factory::createMarlinTrkSystem( "DDKalTest" , 0, "" ) ;
   
   
@@ -109,14 +44,14 @@ void DDSpacePointBuilder::init() {
   }
   
   trksystem->init() ;  
-
+  */
   dd4hep::Detector& theDetector = dd4hep::Detector::getInstance();
   //theDetector = dd4hep::Detector::getInstance();
   
   //===========  get the surface map from the SurfaceManager ================
   
   dd4hep::rec::SurfaceManager& surfMan = *theDetector.extension<dd4hep::rec::SurfaceManager>() ;
-  dd4hep::DetElement det = theDetector.detector( _subDetName ) ;
+  dd4hep::DetElement det = theDetector.detector( m_subDetName ) ;
   //const dd4hep::rec::SurfaceMap *surfMap ;
   surfMap = surfMan.map( det.name() ) ;
   
@@ -130,75 +65,46 @@ void DDSpacePointBuilder::init() {
     for(std::vector<const dd4hep::rec::ISurface*>::const_iterator surf = surfaces.begin() ; surf != surfaces.end() ; ++surf){
     surfMap[(*surf)->id() ] = (*surf) ;
   }
-  */
-
-
-  
+  */ 
 }
 
 
-void DDSpacePointBuilder::processRunHeader( LCRunHeader* ) {
-
-  _nRun++ ;
-} 
-
-
-
-void DDSpacePointBuilder::processEvent( LCEvent * evt ) { 
-
-  LCCollection* col = 0 ;
-  LCRelationNavigator* nav = 0 ; 
-
-  try{
-    col = evt->getCollection( _TrackerHitCollection ) ;
-  }
-  catch(DataNotAvailableException &e){
-    streamlog_out(DEBUG4) << "Collection " << _TrackerHitCollection.c_str() << " is unavailable in event " << _nEvt << std::endl;
-  }
-
-  try{
-    nav = new LCRelationNavigator(evt->getCollection( _TrackerHitSimHitRelCollection ));
-  }
-  catch(DataNotAvailableException &e){
-    streamlog_out(DEBUG4) << "Collection " << _TrackerHitSimHitRelCollection.c_str() << " is unavailable in event " << _nEvt << std::endl;
-  }
-
-    
-  if( col != NULL && nav != NULL ){
-    
-    
+std::tuple<edm4hep::TrackerHitCollection, edm4hep::TrackerHitSimTrackerHitLinkCollection> operator(
+        const edm4hep::TrackerHitCollection& inputHits,
+        const edm4hep::TrackerHitSimTrackerHitLinkCollection& inputRels) const{
+ 
     unsigned createdSpacePoints = 0;
     unsigned rawStripHits = 0;
     unsigned possibleSpacePoints = 0;
-    _nOutOfBoundary = 0;
-    _nStripsTooParallel = 0;
-    _nPlanesNotParallel = 0;
+    m_nOutOfBoundary = 0;
+    m_nStripsTooParallel = 0;
+    m_nPlanesNotParallel = 0;
     
     
-    LCCollectionVec * spCol = new LCCollectionVec(LCIO::TRACKERHIT);    // output spacepoint collection
+    edm4hep::TrackerHitCollection spCol;    // output spacepoint collection
 
     // Relation navigator for creating SpacePoint - SimTrackerHit relations
-    auto spSimHitNav = UTIL::LCRelationNavigator(LCIO::TRACKERHIT, LCIO::SIMTRACKERHIT);
+    edm4hep::TrackerHitSimTrackerHitLinkCollection spRelCollection;
 
-    unsigned nHits = col->getNumberOfElements()  ;
+    unsigned nHits = inputHits.size();
     
-    streamlog_out(DEBUG3) << "Number of hits: " << nHits <<"\n";
+    debug() << "Number of hits: " << nHits << endmsg;
     
     //store hits in map according to their CellID0
-    std::map< int , std::vector< TrackerHitPlane* > > map_cellID0_hits;
-    std::map< int , std::vector< TrackerHitPlane* > >::iterator it;
+    std::map< int , std::vector< edm4hep::TrackerHitPlane* > > map_cellID_hits;
+    std::map< int , std::vector< edm4hep::TrackerHitPlane* > >::iterator it;
     
     for( unsigned i=0; i<nHits; i++){
       
-      TrackerHitPlane* trkHit = dynamic_cast<TrackerHitPlane*>( col->getElementAt( i ) );
+      edm4hep::TrackerHitPlane trkHit = inputHits.at( i );
 
       if( trkHit != NULL) {
-        streamlog_out(DEBUG3) << "Add hit with CellID0 = " << trkHit->getCellID0() << " " << getCellID0Info( trkHit->getCellID0() ) << "\n";
-        map_cellID0_hits[ trkHit->getCellID0() ].push_back( trkHit );
+        debug() << "Add hit with CellID0 = " << trkHit.getCellID() << " " << getCellID0Info( trkHit.getCellID() ) << endmsg;
+        map_cellID0_hits[ trkHit.getCellID0() ].push_back( &trkHit );
       }
     }
 
-    UTIL::BitField64  cellID( LCTrackerCellID::encoding_string() );
+    UTIL::BitField64  cellID("system:5,side:-2,layer:6,module:11,sensor:8");
     
     // now loop over all CellID0s
     for( it= map_cellID0_hits.begin(); it!= map_cellID0_hits.end(); it++ ){
@@ -351,9 +257,6 @@ void DDSpacePointBuilder::processEvent( LCEvent * evt ) {
     
     
     streamlog_out(DEBUG3) << "\n";
-    
-  }
-
 
   _nEvt ++ ;
   
