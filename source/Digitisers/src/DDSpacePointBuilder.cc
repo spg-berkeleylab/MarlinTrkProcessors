@@ -65,7 +65,9 @@ StatusCode DDSpacePointBuilder::initialize() {
     for(std::vector<const dd4hep::rec::ISurface*>::const_iterator surf = surfaces.begin() ; surf != surfaces.end() ; ++surf){
     surfMap[(*surf)->id() ] = (*surf) ;
   }
-  */ 
+  */
+
+  return StatusCode::SUCCESS; 
 }
 
 
@@ -80,7 +82,14 @@ std::tuple<edm4hep::TrackerHitCollection, edm4hep::TrackerHitSimTrackerHitLinkCo
     m_nStripsTooParallel = 0;
     m_nPlanesNotParallel = 0;
     
-    
+    // Map TrackerHits to SimTrackerHits
+    std::unordered_map<edm4hep::TrackerHit, std::vector<edm4hep::SimTrackerHit>> trackerHit2SimHit;
+    for (const auto& hitRel : inputRels) {
+      edm4hep::TrackerHit trackerHit = hitRel.getFrom();
+      edm4hep::SimTrackerHit simTrackerHit = hitRel.getTo();
+      trackerHit2SimHit[trackerHit].push_back(simTrackerHit);
+    } 
+   
     edm4hep::TrackerHitCollection spCol;    // output spacepoint collection
 
     // Relation navigator for creating SpacePoint - SimTrackerHit relations
@@ -90,45 +99,43 @@ std::tuple<edm4hep::TrackerHitCollection, edm4hep::TrackerHitSimTrackerHitLinkCo
     
     debug() << "Number of hits: " << nHits << endmsg;
     
-    //store hits in map according to their CellID0
+    //store hits in map according to their CellID
     std::map< int , std::vector< edm4hep::TrackerHitPlane* > > map_cellID_hits;
     std::map< int , std::vector< edm4hep::TrackerHitPlane* > >::iterator it;
     
     for( unsigned i=0; i<nHits; i++){
       
-      edm4hep::TrackerHitPlane trkHit = inputHits.at( i );
+      edm4hep::TrackerHitPlane trkHit = dynamic_cast<TrackerHitPlane>(inputHits.at( i ));
 
       if( trkHit != NULL) {
-        debug() << "Add hit with CellID0 = " << trkHit.getCellID() << " " << getCellID0Info( trkHit.getCellID() ) << endmsg;
-        map_cellID0_hits[ trkHit.getCellID0() ].push_back( &trkHit );
+        debug() << "Add hit with CellID = " << trkHit.getCellID() << " " << getCellIDInfo( trkHit.getCellID() ) << endmsg;
+        map_cellID_hits[ trkHit.getCellID() ].push_back( &trkHit );
       }
     }
-
-    UTIL::BitField64  cellID("system:5,side:-2,layer:6,module:11,sensor:8");
     
-    // now loop over all CellID0s
-    for( it= map_cellID0_hits.begin(); it!= map_cellID0_hits.end(); it++ ){
-     
+    // now loop over all CellIDs
+    for( it= map_cellID_hits.begin(); it!= map_cellID_hits.end(); it++ ){
       
       rawStripHits += it->second.size();
       
-      std::vector< TrackerHitPlane* > hitsFront = it->second;
+      std::vector< edm4hep::TrackerHitPlane* > hitsFront = it->second;
   
-      int cellID0 = it->first;
+      int cellID = it->first;
      
-      //get the CellID0s at the back of this sensor
-      std::vector< int > cellID0sBack = getCellID0sAtBack( cellID0 );
+      //get the CellIDs at the back of this sensor
+      std::vector< int > cellIDsBack = getCellIDsAtBack( cellID );
 
-      for( unsigned i=0; i< cellID0sBack.size(); i++ ){ 
+      for( unsigned i=0; i< cellIDsBack.size(); i++ ){ 
         
         
-        int cellID0Back = cellID0sBack[i];
-        std::vector< TrackerHitPlane* > hitsBack = map_cellID0_hits[ cellID0Back ];
+        int cellIDBack = cellIDsBack[i];
+        std::vector< TrackerHitPlane* > hitsBack = map_cellID_hits[ cellIDBack ];
         
-	streamlog_out(DEBUG3) << "strips: CellID0 " << cellID0  << " " << getCellID0Info( cellID0 )  << "(" << hitsFront.size()
-		  << " hits) <---> CellID0 " << cellID0Back << getCellID0Info( cellID0Back )
-		  << "(" << hitsBack.size() << " hits)\n"
-		  << "--> " << hitsFront.size() * hitsBack.size() << " possible combinations\n";
+	debug() << "strips: CellID " << cellID  << " " << getCellIDInfo( cellID )  << "(" << hitsFront.size()
+		<< " hits) <---> CellID " << cellIDBack << getCellIDInfo( cellIDBack )
+		<< "(" << hitsBack.size() << " hits)\n"
+		<< "--> " << hitsFront.size() * hitsBack.size() << " possible combinations\n"
+                << endmsg;
         
         possibleSpacePoints += hitsFront.size() * hitsBack.size();
         
@@ -143,63 +150,57 @@ std::tuple<edm4hep::TrackerHitCollection, edm4hep::TrackerHitSimTrackerHitLinkCo
             
             TrackerHitPlane* hitBack = hitsBack[j];
 
-            const LCObjectVec& simHitsFront = nav->getRelatedToObjects( hitFront );
-            const LCObjectVec& simHitsBack  = nav->getRelatedToObjects( hitBack );
+            std::vector<edm4hep::SimTrackerHit> simHitsFront =  trackerHit2SimHit[ hitFront ];
+            std::vector<edm4hep::SimTrackerHit> simHitsBack  = trackerHit2SimHit[ hitBack ];
 
-            streamlog_out(DEBUG3) << "attempt to create space point from:" << std::endl;
-            streamlog_out(DEBUG3) << " front hit: " << hitFront << " no. of simhit = " << simHitsFront.size() ;
+            debug() << "attempt to create space point from:\n" << " front hit: " 
+                    << hitFront << " no. of simhit = " << simHitsFront.size() << endmsg;
             if( simHitsFront.empty() == false ) { 
-              SimTrackerHit* simhit = static_cast<EVENT::SimTrackerHit*>(simHitsFront.at(0));
-              streamlog_out(DEBUG3) << " first simhit = " << simhit << " mcp = "<< simhit->getMCParticle() << " ( " << simhit->getPosition()[0] << " " << simhit->getPosition()[1] << " " << simhit->getPosition()[2] << " ) " ; 
+              edm4hep::SimTrackerHit simhit = simHitsFront.at(0);
+              debug() << " first simhit = " << simhit << " mcp = "<< simhit.getParticle() 
+                      << " ( " << simhit.getPosition().x << " " 
+                               << simhit.getPosition().y << " " 
+                               << simhitgetPosition().z << " ) " << endmsg; 
             }
-            streamlog_out(DEBUG3) << std::endl;            
-            streamlog_out(DEBUG3) << "  rear hit: " << hitBack << " no. of simhit = " << simHitsBack.size() ;
+            debug() << "  rear hit: " << hitBack << " no. of simhit = " << simHitsBack.size() ;
             if( simHitsBack.empty() == false ) { 
-              SimTrackerHit* simhit = static_cast<EVENT::SimTrackerHit*>(simHitsBack.at(0));
-              streamlog_out(DEBUG3) << " first simhit = " << simhit << " mcp = "<< simhit->getMCParticle() << " ( " << simhit->getPosition()[0] << " " << simhit->getPosition()[1] << " " << simhit->getPosition()[2] << " ) " ; 
-            }            
-            streamlog_out(DEBUG3) << std::endl;
+              edm4hep::SimTrackerHit simhit = simHitsBack.at(0);
+              debug() << " first simhit = " << simhit << " mcp = "<< simhit.getParticle()
+                      << " ( " << simhit.getPosition().x << " " 
+                               << simhit.getPosition().y << " " 
+                               << simhit.getPosition().z << " ) " << endmsg; 
+            }
             
             bool ghost_hit = true;
             
             if (simHitsFront.size()==1 && simHitsBack.size() == 1) {
-
-              streamlog_out(DEBUG3) << "SpacePoint creation from two good hits:" << std::endl;
-
-                ghost_hit = static_cast<EVENT::SimTrackerHit*>(simHitsFront.at(0))->getMCParticle() != static_cast<EVENT::SimTrackerHit*>(simHitsBack.at(0))->getMCParticle();
-              
+              debug() << "SpacePoint creation from two good hits:" << endmsg;
+              ghost_hit = simHitsFront.at(0).getParticle() != simHitsBack.at(0).getMCParticle(); 
             }
             
             if ( ghost_hit == true ) {
-              streamlog_out(DEBUG3) << "SpacePoint Ghosthit!" << std::endl;
+              debug() << "SpacePoint Ghosthit!" << endmsg;
             }
-            
-            cellID.setValue( cellID0 );
-            
-            //int subdet = cellID[ LCTrackerCellID::subdet() ] ;
 
             double strip_length_mm = 0;
-	    strip_length_mm = _striplength ;
+	    strip_length_mm = m_striplength ;
 
             // add tolerence 
-            strip_length_mm = strip_length_mm * (1.0 + _striplength_tolerance);
+            strip_length_mm = strip_length_mm * (1.0 + m_striplength_tolerance);
             
-            //TrackerHitImpl* spacePoint = createSpacePoint( hitFront, hitBack, strip_length_mm, surfMap);
-	    TrackerHitImpl* spacePoint = createSpacePoint( hitFront, hitBack, strip_length_mm);
+	    edm4hep::MutableTrackerHitPlane spacePoint = createSpacePoint( hitFront, hitBack, strip_length_mm);
 
-            if ( spacePoint != NULL ) { 
+            if ( spacePoint != NULL ) {
 
-              CellIDEncoder<TrackerHitImpl> cellid_encoder( LCTrackerCellID::encoding_string() , spCol );
-              cellid_encoder.setValue( cellID0 ); //give the new hit, the CellID0 of the front hit
-              cellid_encoder.setCellID( spacePoint ) ;
+              spacePoint.setCellID(cellID);
               
               // store the hits it's composed of:
-              spacePoint->rawHits().push_back( hitFront );
-              spacePoint->rawHits().push_back( hitBack );
+              //spacePoint->rawHits().push_back( hitFront );
+              //spacePoint->rawHits().push_back( hitBack );
               
-              spacePoint->setType( UTIL::set_bit( spacePoint->getType() ,  ILDTrkHitTypeBit::COMPOSITE_SPACEPOINT ) ) ;
+              //spacePoint->setType( UTIL::set_bit( spacePoint->getType() ,  ILDTrkHitTypeBit::COMPOSITE_SPACEPOINT ) ) ;
               
-              spCol->addElement( spacePoint ) ; 
+              spCol.push_back( spacePoint ) ; 
               
               createdSpacePoints++;
               
@@ -208,26 +209,32 @@ std::tuple<edm4hep::TrackerHitCollection, edm4hep::TrackerHitSimTrackerHitLinkCo
               // make the relations
               if( simHitsFront.size() == 1 ){
                 
-                SimTrackerHit* simHit = dynamic_cast< SimTrackerHit* >( simHitsFront[0] );
+                edm4hep::SimTrackerHit simHit = simHitsFront[0];
                 
                 if( simHit != NULL ){
-                  spSimHitNav.addRelation(spacePoint, simHit, 0.5);
+                  edm4hep::MutableTrackerHitSimTrackerHitLink link = spRelCollection.create();
+                  link.setFrom(spacePoint);
+                  link.setTo(simHit);
+                  link.setWeight(0.5);
                 }
               }
               if( simHitsBack.size() == 1 ){
                 
-                SimTrackerHit* simHit = dynamic_cast< SimTrackerHit* >( simHitsBack[0] );
+                edm4hep::SimTrackerHit simHit = simHitsBack[0];
                 
                 if( simHit != NULL ){
-                  spSimHitNav.addRelation(spacePoint, simHit, 0.5);
+                  edm4hep::MutableTrackerHitSimTrackerHitLink link = spRelCollection.create();
+                  link.setFrom(spacePoint);
+                  link.setTo(simHit);
+                  link.setWeight(0.5);
                 }
               }
             } else {
                  
               if ( ghost_hit == true ) {
-                streamlog_out( DEBUG3 ) << "Ghosthit correctly rejected" << std::endl;
+                debug() << "Ghosthit correctly rejected" << endmsg;
               } else {
-                streamlog_out( DEBUG3 ) << "True hit rejected!" << std::endl;
+                debug() << "True hit rejected!" << endmsg;
               }
               
                //////////////////////////////////
@@ -241,54 +248,38 @@ std::tuple<edm4hep::TrackerHitCollection, edm4hep::TrackerHitSimTrackerHitLinkCo
       
     }
     
-    evt->addCollection( spCol, _SpacePointsCollection);
-    auto* relCol = spSimHitNav.createLCCollection();
-    evt->addCollection( relCol , _relColName ) ;
+    debug() << "\nCreated " << createdSpacePoints
+            << " space points ( raw strip hits: " << rawStripHits << ")\n\n"
+            
+            << "  There were " << rawStripHits << " strip hits available, giving " 
+            << possibleSpacePoints << " possible space points\n\n"
     
-    streamlog_out(DEBUG3)<< "\nCreated " << createdSpacePoints
-      << " space points ( raw strip hits: " << rawStripHits << ")\n";
-    
-    streamlog_out( DEBUG3 ) << "  There were " << rawStripHits << " strip hits available, giving " 
-      << possibleSpacePoints << " possible space points\n";
-    
-    streamlog_out( DEBUG3 ) << "  " << _nStripsTooParallel << " space points couldn't be created, because the strips were too parallel\n";
-    streamlog_out( DEBUG3 ) << "  " << _nPlanesNotParallel << " space points couldn't be created, because the planes of the measurement surfaces where not parallel enough\n";
-    streamlog_out( DEBUG3 ) << "  " << _nOutOfBoundary     << " space points couldn't be created, because the result was outside the sensor boundary\n"; 
-    
-    
-    streamlog_out(DEBUG3) << "\n";
+            << "  " << _nStripsTooParallel << " space points couldn't be created, "
+                                           << "because the strips were too parallel\n\n"
+            << "  " << _nPlanesNotParallel << " space points couldn't be created, "
+                    << "because the planes of the measurement surfaces where not parallel enough\n\n"
+            << "  " << _nOutOfBoundary     << " space points couldn't be created, "
+                                           << "because the result was outside the sensor boundary\n\n" 
+            << endmsg;
 
-  _nEvt ++ ;
-  
-  delete nav;
-  
+   return std::make_tuple(std::move(spCol, std::move(spRelCollection)); 
 }
 
 
-
-
-
-void DDSpacePointBuilder::check( LCEvent* ) {}
-
-
-void DDSpacePointBuilder::end(){
-   
-   
+StatusCode DDSpacePointBuilder::finalize(){
+  return StatusCode::SUCCESS;
 }
 
 //TrackerHitImpl* DDSpacePointBuilder::createSpacePoint( TrackerHitPlane* a , TrackerHitPlane* b, double stripLength, const dd4hep::rec::SurfaceMap* surfMap ){
-TrackerHitImpl* DDSpacePointBuilder::createSpacePoint( TrackerHitPlane* a , TrackerHitPlane* b, double stripLength ){  
-  const double* pa = a->getPosition();
-  double xa = pa[0];
-  double ya = pa[1];
-  double za = pa[2];
-  CLHEP::Hep3Vector PA( xa,ya,za );
-  dd4hep::rec::Vector3D ddPA( xa * dd4hep::mm, ya * dd4hep::mm, za * dd4hep::mm );
-  double du_a = a->getdU();  
+edm4hep::MutableTrackerHitPlane DDSpacePointBuilder::createSpacePoint( TrackerHitPlane* a , TrackerHitPlane* b, double stripLength ){  
+  edm4hep::Vector3d pa = a->getPosition();
+  CLHEP::Hep3Vector PA( pa.x, pa.y, pa.z );
+  dd4hep::rec::Vector3D ddPA( pa.x * dd4hep::mm, pa.y * dd4hep::mm, pa.z * dd4hep::mm );
+  float du_a = a->getdU();
   
-  //const dd4hep::rec::ISurface* msA = surfMap[a->getCellID0()];
-  const dd4hep::rec::ISurface* msA = surfMap->find(a->getCellID0())->second;
-  streamlog_out (DEBUG2) << " do i find a surface " << *msA << std::endl ;
+  //const dd4hep::rec::ISurface* msA = surfMap[a->getCellID()];
+  const dd4hep::rec::ISurface* msA = surfMap->find(a->getCellID())->second;
+  debug() << " Do I find a surface " << *msA << endmsg;
   dd4hep::rec::Vector3D ddWA = msA->normal();
   dd4hep::rec::Vector3D ddUA = msA->u();
   dd4hep::rec::Vector3D ddVA = msA->v();
@@ -296,15 +287,12 @@ TrackerHitImpl* DDSpacePointBuilder::createSpacePoint( TrackerHitPlane* a , Trac
   CLHEP::Hep3Vector VA(ddVA.x() / dd4hep::mm, ddVA.y() / dd4hep::mm, ddVA.z() / dd4hep::mm);
   CLHEP::Hep3Vector WA(ddWA.x() / dd4hep::mm, ddWA.y() / dd4hep::mm, ddWA.z() / dd4hep::mm); 
   
-  const double* pb = b->getPosition();
-  double xb = pb[0];
-  double yb = pb[1];
-  double zb = pb[2];
-  CLHEP::Hep3Vector PB( xb,yb,zb );
-  dd4hep::rec::Vector3D ddPB( xb * dd4hep::mm,yb * dd4hep::mm,zb * dd4hep::mm );
-  double du_b = b->getdU();  
+  edm4hep::Vector3d pb = b->getPosition();
+  CLHEP::Hep3Vector PB( pb.x, pb.y, pb.z );
+  dd4hep::rec::Vector3D ddPB( pb.x * dd4hep::mm, pb.y * dd4hep::mm, pb.z * dd4hep::mm );
+  float du_b = b->getdU();
   
-  const dd4hep::rec::ISurface* msB = surfMap->find(b->getCellID0())->second;
+  const dd4hep::rec::ISurface* msB = surfMap->find(b->getCellID())->second;
   dd4hep::rec::Vector3D ddWB = msB->normal();
   dd4hep::rec::Vector3D ddUB = msB->u();
   dd4hep::rec::Vector3D ddVB = msB->v();
@@ -313,7 +301,12 @@ TrackerHitImpl* DDSpacePointBuilder::createSpacePoint( TrackerHitPlane* a , Trac
   CLHEP::Hep3Vector VB(ddVB.x() / dd4hep::mm, ddVB.y() / dd4hep::mm, ddVB.z() / dd4hep::mm);
   CLHEP::Hep3Vector WB(ddWB.x() / dd4hep::mm, ddWB.y() / dd4hep::mm, ddWB.z() / dd4hep::mm);
   
-  streamlog_out(DEBUG3)  << "\t ( " << xa << " " << ya << " " << za << " ) <--> ( " << xb << " " << yb << " " << zb << " )\n";
+  debug() << "\t ( " << pa.x << " " 
+                     << pa.y << " " 
+                     << pa.z << " ) <--> ( " 
+                     << pb.x << " " 
+                     << pb.y << " " 
+                     << pb.z << " )" << endmsg;
 
   //////////////////////////////////////////////////////////////////////////////////////////////////////
   // First: check if the two measurement surfaces are parallel (i.e. the w are parallel or antiparallel)
@@ -322,9 +315,11 @@ TrackerHitImpl* DDSpacePointBuilder::createSpacePoint( TrackerHitPlane* a , Trac
   double angleMax = 1.*M_PI/180.;
   if(( angle > angleMax )&&( angle < M_PI-angleMax )){
     
-    _nPlanesNotParallel++;
-    streamlog_out(DEBUG3) << "\tThe planes of the measurement surfaces are not parallel enough, the angle between the W vectors is " << angle
-    << " where the angle has to be smaller than " << angleMax << " or bigger than " << M_PI-angleMax << "\n\n";
+    m_nPlanesNotParallel++;
+    debug() << "\tThe planes of the measurement surfaces are not parallel enough, "
+            << "the angle between the W vectors is " << angle
+            << " where the angle has to be smaller than " << angleMax 
+            << " or bigger than " << M_PI-angleMax << endmsg;
     return NULL; //calculate the xing point and if that fails don't create a spacepoint
     
   }
@@ -337,9 +332,11 @@ TrackerHitImpl* DDSpacePointBuilder::createSpacePoint( TrackerHitPlane* a , Trac
   double angleMin= 1.*M_PI/180.;
   if(( angle < angleMin )||( angle > M_PI-angleMin )){
     
-    _nStripsTooParallel++;
-    streamlog_out(DEBUG3) << "\tThe strips (V vectors) of the measurement surfaces are too parallel, the angle between the V vectors is " << angle
-    << " where the angle has to be between " << angleMax << " or bigger than " << M_PI-angleMin << "\n\n";
+    m_nStripsTooParallel++;
+    debug() << "\tThe strips (V vectors) of the measurement surfaces are too parallel, "
+            << "the angle between the V vectors is " << angle
+            << " where the angle has to be between " << angleMax 
+            << " or bigger than " << M_PI-angleMin << endmsg;
     return NULL; //calculate the xing point and if that fails don't create a spacepoint
     
   }
@@ -351,30 +348,9 @@ TrackerHitImpl* DDSpacePointBuilder::createSpacePoint( TrackerHitPlane* a , Trac
   
   CLHEP::Hep3Vector point;
 
-//  calculatePointBetweenTwoLines( PA, VA, PB, VB, point );
-//  
-//  // we want to set the space point on the surface of the hit closest to the IP
-//  if (PA.mag2() < PB.mag2()) {
-//    calculatePointBetweenTwoLines( PA, VA, PB, VB, point );
-//  } else {
-//    calculatePointBetweenTwoLines( PB, VB, PA, VA, point );
-//  }
-//  
-//
-//  
-//  streamlog_out( DEBUG2 ) << "\tStandard: Position of space point (global) : ( " << point.x() << " " << point.y() << " " << point.z() << " )\n";
-
   CLHEP::Hep3Vector vertex(0.,0.,0.);
   dd4hep::rec::Vector2D L1 = msA->globalToLocal(ddPA);
   dd4hep::rec::Vector2D L2 = msB->globalToLocal(ddPB);
-  //CLHEP::Hep3Vector L1 = ccsA->getLocalPoint(PA);
-  //CLHEP::Hep3Vector L2 = ccsB->getLocalPoint(PB);
-
-  //msA->localToGlobal(PA);
-  //msA->localToGlobal(PB);
-
-  //streamlog_out(DEBUG3) << " L1 = " << L1 << std::endl;
-  //streamlog_out(DEBUG3) << " L2 = " << L2 << std::endl;
 
   dd4hep::rec::Vector2D ddSL1, ddEL1, ddSL2, ddEL2;
   if (_subDetName == "SET"){
@@ -390,17 +366,6 @@ TrackerHitImpl* DDSpacePointBuilder::createSpacePoint( TrackerHitPlane* a , Trac
       ddEL2 = dd4hep::rec::Vector2D( L2.u(), (stripLength * dd4hep::mm)/2.0 );        
   }
 
-  //L1.setY(-stripLength/2.0);
-  //CLHEP::Hep3Vector SL1 = L1;
-  //L1.setY( stripLength/2.0);
-  //CLHEP::Hep3Vector EL1 = L1;
-  //L2.setY(-stripLength/2.0);
-  //CLHEP::Hep3Vector SL2 = L2;
-  //L2.setY( stripLength/2.0);
-  //CLHEP::Hep3Vector EL2 = L2;
-  
-  
-
   dd4hep::rec::Vector3D ddS1 = msA->localToGlobal(ddSL1);
   dd4hep::rec::Vector3D ddE1 = msA->localToGlobal(ddEL1);
   dd4hep::rec::Vector3D ddS2 = msB->localToGlobal(ddSL2);
@@ -409,18 +374,12 @@ TrackerHitImpl* DDSpacePointBuilder::createSpacePoint( TrackerHitPlane* a , Trac
   CLHEP::Hep3Vector E1 (ddE1.x() / dd4hep::mm, ddE1.y() / dd4hep::mm, ddE1.z() / dd4hep::mm);
   CLHEP::Hep3Vector S2 (ddS2.x() / dd4hep::mm, ddS2.y() / dd4hep::mm, ddS2.z() / dd4hep::mm);
   CLHEP::Hep3Vector E2 (ddE2.x() / dd4hep::mm, ddE2.y() / dd4hep::mm, ddE2.z() / dd4hep::mm);
-  //CLHEP::Hep3Vector S1 = ccsA->getGlobalPoint(SL1);
-  //CLHEP::Hep3Vector E1 = ccsA->getGlobalPoint(EL1);
-  //CLHEP::Hep3Vector S2 = ccsB->getGlobalPoint(SL2);
-  //CLHEP::Hep3Vector E2 = ccsB->getGlobalPoint(EL2);
 
-  streamlog_out(DEBUG3) << " stripLength = " << stripLength << std::endl;
-  
-  streamlog_out(DEBUG3) << " S1 = " << S1 << std::endl;
-  streamlog_out(DEBUG3) << " E1 = " << E1 << std::endl;
-
-  streamlog_out(DEBUG3) << " S2 = " << S2 << std::endl;
-  streamlog_out(DEBUG3) << " E2 = " << E2 << std::endl;
+  debug() << " stripLength = " << stripLength << "\n"
+          << " S1 = " << S1 << "\n"
+          << " E1 = " << E1 << "\n"
+          << " S2 = " << S2 << "\n"
+          << " E2 = " << E2 << endmsg;
 
   point.set(0.0, 0.0, 0.0);
   
@@ -428,60 +387,31 @@ TrackerHitImpl* DDSpacePointBuilder::createSpacePoint( TrackerHitPlane* a , Trac
   int valid_intersection = calculatePointBetweenTwoLines_UsingVertex( S1, E1, S2, E2, vertex, point );
   
   if (valid_intersection != 0) {
-    streamlog_out(DEBUG3) << "\tNo valid intersection for lines" << std::endl;
+    debug() << "\tNo valid intersection for lines." << endmsg;
     return NULL;
   }
   
-  streamlog_out(DEBUG3) << "\tVertex: Position of space point (global) : ( " << point.x() << " " << point.y() << " " << point.z() << " )\n";
+  debug() << "\tVertex: Position of space point (global) : ( " << point.x() << " " 
+                                                               << point.y() << " " 
+                                                               << point.z() << " )" << endmsg;
   
-
   // using dd4hep to check if hit within boundaries
   dd4hep::rec::Vector3D DDpoint( point.x() * dd4hep::mm, point.y() * dd4hep::mm, point.z() * dd4hep::mm );
 
   if ( !msA->insideBounds(DDpoint)){
 
-    _nOutOfBoundary++;
-    streamlog_out(DEBUG3) << " SpacePoint position lies outside the boundary of the layer " << std::endl ;
-    //streamlog_out(DEBUG3) << "\tSpacePoint position lies outside the boundary of the first layer: local coordinates are ( " << localPointA.x() << " " << localPointA.y() << " " << localPointA.z() << " )\n\n";
+    m_nOutOfBoundary++;
+    debug() << " SpacePoint position lies outside the boundary of the layer." << endmsg;
     
     return NULL;
   }
 
-
-  /*
-  // Check if the new hit is within the boundaries
-  CLHEP::Hep3Vector localPointA = ccsA->getLocalPoint(point);
-  localPointA.setZ( 0. ); // we set w to 0 so it is in the plane ( we are only interested if u and v are in or out of range, to exclude w from the check it is set to 0)
-  
-  CLHEP::Hep3Vector localPointB = ccsB->getLocalPoint(point);
-  localPointB.setZ( 0. ); // we set w to 0 so it is in the plane ( we are only interested if u and v are in or out of range, to exclude w from the check it is set to 0)
-  
-  
-  if( !msA->isLocalInBoundary( localPointA ) ){
-    
-    _nOutOfBoundary++;
-    streamlog_out( DEBUG2 ) << "\tSpacePoint position lies outside the boundary of the first layer: local coordinates are ( " 
-    << localPointA.x() << " " << localPointA.y() << " " << localPointA.z() << " )\n\n";
-    
-    return NULL;
-    
-  }
-  if( !msB->isLocalInBoundary( localPointB ) ){
-    
-    _nOutOfBoundary++;
-    streamlog_out( DEBUG2 ) << "\tSecond hit is out of boundary: local coordinates are ( " 
-    << localPointB.x() << " " << localPointB.y() << " " << localPointB.z() << " )\n\n";
-    
-    return NULL;
-    
-  }
-  */
   
   //Create the new TrackerHit
-  TrackerHitImpl* spacePoint = new TrackerHitImpl();
+  edm4hep::MutableTrackerHitPlane spacePoint = new edm4hep::MutableTrackerHitPlane();
   
-  double pos[3] = {point.x(), point.y(), point.z() };
-  spacePoint->setPosition(  pos  ) ;
+  edm4hep::Vector3d pos{point.x(), point.y(), point.z() };
+  spacePoint.setPosition( pos );
   
   
   // set error treating the strips as stereo with equal and opposite rotation -- for reference see Karimaki NIM A 374 p367-370
@@ -490,7 +420,7 @@ TrackerHitImpl* DDSpacePointBuilder::createSpacePoint( TrackerHitPlane* a , Trac
   // here we assume that du is the same for both sides
   
   if( fabs(du_a - du_b) > 1.0e-06 ){
-    streamlog_out( ERROR ) << "\tThe measurement errors of the two 1D hits must be equal \n\n";    
+    error() << "\tThe measurement errors of the two 1D hits must be equal" << endmsg;    
     assert( (fabs(du_a - du_b) > 1.0e-06) == false );
     return NULL; //measurement errors are not equal don't create a spacepoint
   }
@@ -515,31 +445,26 @@ TrackerHitImpl* DDSpacePointBuilder::createSpacePoint( TrackerHitPlane* a , Trac
   cov_plane(1,1) = (0.5 * du2) / cos2_alpha;
   cov_plane(2,2) = (0.5 * du2) / sin2_alpha;
   
-  streamlog_out(DEBUG3) << "\t cov_plane  = " << cov_plane << "\n\n";  
-  streamlog_out(DEBUG3) << "\tstrip_angle = " << VA.angle(VB)/(M_PI/180) / 2.0 << " degrees \n\n";
-  
   CLHEP::HepSymMatrix cov_xyz= cov_plane.similarity(rot_sensor_matrix);
   
-  streamlog_out(DEBUG3) << "\t cov_xyz  = " << cov_xyz << "\n\n";
+  debug() << "\t cov_plane  = " << cov_plane << "\n\n"  
+          << "\tstrip_angle = " << VA.angle(VB)/(M_PI/180) / 2.0 << " degrees\n\n" 
+          << "\t cov_xyz  = " << cov_xyz << endmsg;
   
-  EVENT::FloatVec cov( 9 )  ; 
-  int icov = 0 ;
+  edm4hep::CovMatrix3f cov( 9 );
   
   for(int irow=0; irow<3; ++irow ){
     for(int jcol=0; jcol<irow+1; ++jcol){
-      //      streamlog_out(DEBUG3) << "row = " << irow << " col = " << jcol << std::endl ;
-      cov[icov] = cov_xyz[irow][jcol] ;
-//      streamlog_out(DEBUG3) << "cov["<< icov << "] = " << cov[icov] << std::endl ;
-      ++icov ;
+      cov.setValue(cov_xyz[irow][jcol], irow, jcol);
     }
   }
   
-  spacePoint->setCovMatrix(cov);
+  spacePoint.setCovMatrix(cov);
 
   const auto pointTime = std::min(a->getTime(), b->getTime());
-  spacePoint->setTime(pointTime);
+  spacePoint.setTime(pointTime);
 
-  streamlog_out(DEBUG3) << "\tHit accepted\n\n";
+  debug() << "\tHit accepted" << endmsg;
   
   return spacePoint;
   
@@ -567,18 +492,18 @@ int DDSpacePointBuilder::calculatePointBetweenTwoLines_UsingVertex(
   
   bool ok = true;
   
-//  streamlog_out( DEBUG1 ) << " Vertex = " << Vertex << std::endl; 
+//  debug() << " Vertex = " << Vertex << endmsg; 
 //  
-//  streamlog_out( DEBUG1 ) << " PA = " << PA << std::endl;
-//  streamlog_out( DEBUG1 ) << " PB = " << PB << std::endl;
-//  streamlog_out( DEBUG1 ) << " PC = " << PC << std::endl;
-//  streamlog_out( DEBUG1 ) << " PD = " << PD << std::endl;
+//  debug() << " PA = " << PA << endmsg;
+//  debug() << " PB = " << PB << endmsg;
+//  debug() << " PC = " << PC << endmsg;
+//  debug() << " PD = " << PD << endmsg;
   
   CLHEP::Hep3Vector VAB(PA-PB);
   CLHEP::Hep3Vector VCD(PC-PD);
 
-//  streamlog_out( DEBUG1 ) << " VAB = " << VAB << std::endl;
-//  streamlog_out( DEBUG1 ) << " VCD = " << VCD << std::endl;
+//  debug() << " VAB = " << VAB << endmsg;
+//  debug() << " VCD = " << VCD << endmsg;
   
   CLHEP::Hep3Vector  s(PA+PB-2*Vertex);   // twice the vector from vertex to midpoint
   CLHEP::Hep3Vector  t(PC+PD-2*Vertex);   // twice the vector from vertex to midpoint
@@ -586,10 +511,10 @@ int DDSpacePointBuilder::calculatePointBetweenTwoLines_UsingVertex(
   CLHEP::Hep3Vector  qs(VAB.cross(s));  
   CLHEP::Hep3Vector  rt(VCD.cross(t));  
 
-//  streamlog_out( DEBUG1 ) << " s = " << s << std::endl;
-//  streamlog_out( DEBUG1 ) << " t = " << t << std::endl;
-//  streamlog_out( DEBUG1 ) << " qs = " << qs << std::endl;
-//  streamlog_out( DEBUG1 ) << " rt = " << rt << std::endl;
+//  debug() << " s = " << s << endmsg;
+//  debug() << " t = " << t << endmsg;
+//  debug() << " qs = " << qs << endmsg;
+//  debug() << " rt = " << rt << endmsg;
   
   
   double m = (-(s*rt)/(VAB*rt)); // ratio for first line
@@ -598,7 +523,7 @@ int DDSpacePointBuilder::calculatePointBetweenTwoLines_UsingVertex(
   
   if (m>limit || m<-1.*limit) {
     
-    streamlog_out( DEBUG1 ) << "m' = " << m << " \n";
+    debug() << "m' = " << m << endmsg;
     
     ok = false;
     
@@ -608,7 +533,7 @@ int DDSpacePointBuilder::calculatePointBetweenTwoLines_UsingVertex(
 
 	  if (n>limit || n<-1.*limit) {
   
-      streamlog_out( DEBUG1 ) << "n' = " << n << " \n";
+      debug() << "n' = " << n << endmsg;
       
       ok = false;
 
@@ -636,11 +561,11 @@ int DDSpacePointBuilder::calculatePointBetweenTwoLines( const CLHEP::Hep3Vector&
   CLHEP::HepRotation rot;
   rot.rotateZ( -n.phi() );
   CLHEP::Hep3Vector nPrime = rot * n; //now the phi of nPrime should be 0
-  streamlog_out( DEBUG0 ) << "phi of n' = " << nPrime.phi() << " (it should be 0!!!)\n";
+  debug() << "phi of n' = " << nPrime.phi() << " (it should be 0!!!)" << endmsg;
   rot.rotateY( -n.theta() );
   nPrime = rot * n;
-  streamlog_out( DEBUG0 ) << "phi of n'' = " << nPrime.phi() << " (it should be 0!!!)\n";
-  streamlog_out( DEBUG0 ) << "theta of n'' = " << nPrime.theta() <<  " (it should be 0!!!)\n";
+  debug() << "phi of n'' = " << nPrime.phi() << " (it should be 0!!!)" << endmsg;
+  debug() << "theta of n'' = " << nPrime.theta() <<  " (it should be 0!!!)" << endmsg;
   
   // Now rotate all the vectors and points into this coordinatesystem.
   CLHEP::Hep3Vector P1prime = rot * P1;
@@ -684,34 +609,32 @@ int DDSpacePointBuilder::calculateXingPoint( double x1, double y1, float ex1, fl
   x = x2 + t*ex2;
   y = y2 + t*ey2;
 
-  return 0;
-
-  
+  return 0; 
 
 }
  
-std::vector< int > DDSpacePointBuilder::getCellID0sAtBack( int cellID0 ){
+std::vector< int > DDSpacePointBuilder::getCellIDsAtBack( int cellID ){
   
   std::vector< int > back;
   
   //find out detector, layer
-  UTIL::BitField64  cellID( LCTrackerCellID::encoding_string() );
-  cellID.setValue( cellID0 );
+  ACTSTracking::BitField64 cellIDer( "system:5,side:-2,layer:6,module:11,sensor:8" );
+  cellIDer.setValue( cellID );
   
 
-  int subdet = cellID[ LCTrackerCellID::subdet() ] ;
-  int layer  = cellID[ LCTrackerCellID::layer() ];
+  int subdet = cellIDer[ "system" ];
+  int layer  = cellIDer[ "layer" ];
   
   if (subdet != ILDDetID::FTD)  {
     
     //check if sensor is in front
     if( layer%2 == 0 ){ // even layers are front sensors
       
-      cellID[ LCTrackerCellID::layer() ] = layer + 1; 
+      cellIDer[ "layer" ] = layer + 1; 
       // it is assumed that the even layers are the front layers
       // and the following odd ones the back layers
       
-      back.push_back( cellID.lowWord() );
+      back.push_back( cellID );
       
     }
   }
@@ -719,15 +642,16 @@ std::vector< int > DDSpacePointBuilder::getCellID0sAtBack( int cellID0 ){
   else{
 
     dd4hep::Detector & theDetector2 = dd4hep::Detector::getInstance();
-    dd4hep::DetElement ftdDE = theDetector2.detector( _subDetName);
+    dd4hep::DetElement ftdDE = theDetector2.detector( m_subDetName);
     dd4hep::rec::ZDiskPetalsData* ft = ftdDE.extension<dd4hep::rec::ZDiskPetalsData>();
 
-    int sensor = cellID[ LCTrackerCellID::sensor() ];
+    int sensor = cellIDer[ "sensor" ];
     //int Nsensors = ft->layers.at(layer).petalNumber ; 
     int Nsensors = ft->layers.at(layer).sensorsPerPetal ;
 
-    streamlog_out(DEBUG3) << " layer " << layer << " sensors " << Nsensors << std::endl; 
-    streamlog_out(DEBUG3) << " so sensor " << sensor << " is connected with sensor " << sensor + Nsensors/2 << std::endl; 
+    debug() << " layer " << layer << " sensors " << Nsensors << "\n" 
+            << " so sensor " << sensor << " is connected with sensor " 
+            << sensor + Nsensors/2 << endmsg;
 
     std::vector<dd4hep::rec::ZDiskPetalsStruct::SensorType> Sensors ;
     
@@ -735,41 +659,41 @@ std::vector< int > DDSpacePointBuilder::getCellID0sAtBack( int cellID0 ){
     //if(( Sensors.at(layer).DoubleSided ) && ( sensor <= Nsensors / 2 ) ){
     if (sensor <= Nsensors / 2 ) {
       
-      cellID[ LCTrackerCellID::sensor() ] = sensor + Nsensors / 2; 
+      cellIDer[ "sensor" ] = sensor + Nsensors / 2; 
       // it is assumed, that sensors 1 until n/2 will be on front
       // and sensor n/2 + 1 until n are at the back
       // so the sensor x, will have sensor x+n/2 at the back
       
-      back.push_back( cellID.lowWord() );
+      back.push_back( cellID);
       
     }  
 
   }
-
-  return back;
-
-
-  
+TrackerCellID::subdet
+  return back; 
 }
 
 
-
-std::string DDSpacePointBuilder::getCellID0Info( int cellID0 ){
+std::string DDSpacePointBuilder::getCellIDInfo( int cellID ){
 
   std::stringstream s;
   
   //find out layer, module, sensor
-  UTIL::BitField64  cellID( LCTrackerCellID::encoding_string() );
-  cellID.setValue( cellID0 );
+  ACTSTracking::BitField64  cellIDer( "system:5,side:-2,layer:6,module:11,sensor:8" );
+  cellIDer.setValue( cellID );
 
-  int subdet = cellID[ LCTrackerCellID::subdet() ] ;
-  int side   = cellID[ LCTrackerCellID::side() ];
-  int module = cellID[ LCTrackerCellID::module() ];
-  int sensor = cellID[ LCTrackerCellID::sensor() ];
-  int layer  = cellID[ LCTrackerCellID::layer() ];
+  int subdet = cellID[ "system" ] ;
+  int side   = cellID[ "side" ];
+  int module = cellID[ "module" ];
+  int sensor = cellID[ "sensor" ];
+  int layer  = cellID[ "layer" ];
   
-  s << "(su" << subdet << ",si" << side << ",la" << layer << ",mo" << module << ",se" << sensor << ")";
+  s << "(su" << subdet 
+    << ",si" << side 
+    << ",la" << layer 
+    << ",mo" << module 
+    << ",se" << sensor 
+    << ")";
   
-  return s.str();
-  
+  return s.str(); 
 }

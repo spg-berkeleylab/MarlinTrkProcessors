@@ -112,6 +112,8 @@ StatusCode DDPlanarDigiAlgorithm::initialize() {
   
   (void)histSvc->regHist("/histos/digi_planar/hitE", m_h[ hitE ]);
   (void)histSvc->regHist("/histos/digi_planar/hitsAccepted", m_h[ hitsAccepted ]);
+  
+  geturn StatusCode::SUCCESS;
 }
 
 std::tuple<edm4hep::TrackerHitCollection, edm4hep::TrackerHitSimTrackerHitLinkCollection> operator(const edm4hep::SimTrackerHitCollection& inputSim) const{

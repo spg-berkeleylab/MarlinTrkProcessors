@@ -144,24 +144,24 @@ public:
   
   /** @return a spacepoint (in the form of a TrackerHitImpl* ) created from two TrackerHitPlane* which stand for si-strips */
 
-  edm4hep::MutableTrackerHitPlane* createSpacePoint(edm4hep::TrackerHitPlane* a , edm4hep::TrackerHitPlane* b, double stripLength );
+  edm4hep::MutableTrackerHitPlane createSpacePoint(edm4hep::TrackerHitPlane* a , edm4hep::TrackerHitPlane* b, double stripLength );
   
-  /** @return the CellID0s of the sensors that are back to back to a given front sensor. If the given sensor
+  /** @return the CellIDs of the sensors that are back to back to a given front sensor. If the given sensor
    * is in the back itself or has no corresponding sensor(s) on the back the vector will be empty.
    * 
-   * @param cellID0 a CellID0 corresponding to a sensor
+   * @param cellID a CellID corresponding to a sensor
    */
-  std::vector< int > getCellID0sAtBack( int cellID0 );
+  std::vector< int > getCellIDsAtBack( int cellID );
   
-  std::vector< int > getCellID0sAtBackOfFTD( int cellID0 );
+  std::vector< int > getCellIDsAtBackOfFTD( int cellID );
   
-  std::vector< int > getCellID0sAtBackOfSET( int cellID0 );
+  std::vector< int > getCellIDsAtBackOfSET( int cellID );
   
-  std::vector< int > getCellID0sAtBackOfSIT( int cellID0 );
+  std::vector< int > getCellIDsAtBackOfSIT( int cellID );
 
   
-  /** @return information about the contents of the passed CellID0 */ 
-  std::string getCellID0Info( int cellID0 );
+  /** @return information about the contents of the passed CellID */ 
+  std::string getCellIDInfo( int cellID );
 
   unsigned m_nOutOfBoundary;
   unsigned m_nStripsTooParallel;

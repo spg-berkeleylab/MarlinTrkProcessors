@@ -31,9 +31,10 @@ Steve Aplin 26 June 2009 (DESY)
 #include <edm4hep/MCParticle.h>
 #include <edm4hep/SimTrackerHit.h>
 #include <edm4hep/MutableTrackerHitPlane.h>
-#include <UTIL/CellIDEncoder.h>
+#include <edm4hep/MutableTrackerHitSimTrackerHitLink.h>
 
 
+#include <TH1.h>
 #include "DDRec/DetectorData.h"
 #include "CLHEP/Vector/TwoVector.h"
 
@@ -115,8 +116,8 @@ public:
    */
   StatusCode finalize();
   
-  void writeVoxelToHit( Voxel_tpc* aVoxel, UTIL::LCRelationNavigator& hitSimHitNav) ;
-  void writeMergedVoxelsToHit( std::vector <Voxel_tpc*>* hitList, UTIL::LCRelationNavigator& hitSimHitNav ) ;
+  void writeVoxelToHit( Voxel_tpc* aVoxel, edm4hep::MutableTrackerHitSimTrackerHitLink* hitLink, edm4hep::MutableTrackerHitPlane* hit) ;
+  void writeMergedVoxelsToHit( std::vector <Voxel_tpc*>* hitList, edm4hep::MutableTrackerHitSimTrackerHitLink* hitLink, edm4hep::MutableTrackerHitPlane* hit) ;
   void plotHelixHitResidual(edm4hep::MCParticle *mcp, CLHEP::Hep3Vector *thisPointRPhi);
   double getPadPhi( CLHEP::Hep3Vector* thisPointRPhi, CLHEP::Hep3Vector* firstPointRPhi, CLHEP::Hep3Vector* middlePointRPhi, CLHEP::Hep3Vector* lastPointRPhi);
   double getPadTheta( CLHEP::Hep3Vector* firstPointRPhi, CLHEP::Hep3Vector* middlePointRPhi, CLHEP::Hep3Vector* lastPointRPhi );
@@ -124,20 +125,20 @@ public:
 protected:
   Gaudi::Property<bool> m_use_raw_hits_to_store_simhit_pointer{this, "UseRawHitsToStoreSimhitPointer", bool(false), "Store the pointer to the SimTrackerHits in RawHits (deprecated)."};
   
-  Gaudi::Property<int> m_rejectCellID0{this, "RejectCellID0", (int)1, "Whether or not to use hits without proper cell ID (pad row)."};
+  Gaudi::Property<int> m_rejectCellID{this, "RejectCellID", (int)1, "Whether or not to use hits without proper cell ID (pad row)."};
   Gaudi::Propert<float> m_padWidth{};
 
-  EVENT::MCParticle* m_mcp{};
-  EVENT::MCParticle* m_previousMCP{};
-  EVENT::MCParticle* m_nextMCP{};
-  EVENT::MCParticle* m_nMinus2MCP{};
-  EVENT::MCParticle* m_nPlus2MCP{};   
+  edm4hep::MCParticle* m_mcp{};
+  edm4hep::MCParticle* m_previousMCP{};
+  edm4hep::MCParticle* m_nextMCP{};
+  edm4hep::MCParticle* m_nMinus2MCP{};
+  edm4hep::MCParticle* m_nPlus2MCP{};   
 
-  SimTrackerHit* m_SimTHit{};
-  SimTrackerHit* m_previousSimTHit{};
-  SimTrackerHit* m_nextSimTHit{};
-  SimTrackerHit* m_nPlus2SimHit{};
-  SimTrackerHit* m_nMinus2SimHit{};
+  edm4hep::SimTrackerHit* m_SimTHit{};
+  edm4hep::SimTrackerHit* m_previousSimTHit{};
+  edm4hep::SimTrackerHit* m_nextSimTHit{};
+  edm4hep::SimTrackerHit* m_nPlus2SimHit{};
+  edm4hep::SimTrackerHit* m_nMinus2SimHit{};
 
   // gsl random number generator
   gsl_rng * m_random {};
@@ -162,9 +163,6 @@ protected:
   std::map< Voxel_tpc *,SimTrackerHit *> m_tpcHitMap{};
   std::vector<float> m_length{};
   int lenpos{};
-
-  edm4hep::TrackerHitPlaneCollection* m_trkhitVec{};
-  CellIDEncoder<edm4hep::MutableTrackerHitPlane>* m_cellid_encoder {};
 
   int  m_NSimTPCHits{};
   int  m_NBackgroundSimTPCHits{};
@@ -224,9 +222,5 @@ protected:
   TH1D * m_NKeptPhysicsAbove02GeVPtTPCHitsHistoPercent{};
   TH1D * m_NKeptPhysicsAbove1GeVPtTPCHitsHistoPercent{};
 
-#endif
 } ;
 #endif
-
-
-
