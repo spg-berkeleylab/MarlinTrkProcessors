@@ -34,9 +34,10 @@
 DECLARE_COMPONENT(DDPlanarDigiAlgorithm)
 
 DDPlanarDigiAlgorithm::DDPlanarDigiAlgorithm() : MultiTransformer(name, svcLoc,
-	{KeyValues("SimTrackHitCollectionName", {"VXDCollection"})}, {
-	 KeyValues("TrackerHitCollectionName", {"VTXTrackerHits"}),
-	 KeyValues("SimTrkHitRelCollection", {"VTXTrackerHitRelations"})}) {}
+       { KeyValues("SimTrackHitCollectionName", {"VXDCollection"})
+         KeyValues("EventHeaderCollectionName", {"HeaderCollection"}) },
+       { KeyValues("TrackerHitCollectionName", {"VTXTrackerHits"}),
+	 KeyValues("SimTrkHitRelCollection", {"VTXTrackerHitRelations"}) }) {}
 
 enum {
   hu = 0,
@@ -53,6 +54,7 @@ enum {
 StatusCode DDPlanarDigiAlgorithm::initialize() { 
   // initialize gsl random generator
   m_rng = gsl_rng_alloc(gsl_rng_ranlxs2);
+  m_idGen = serviceLocator()->service("UniqueIDGenSvc");
   m_h.resize( hSize );
   
   if( m_resU.size() !=  m_resV.size() ) {
@@ -116,10 +118,12 @@ StatusCode DDPlanarDigiAlgorithm::initialize() {
   geturn StatusCode::SUCCESS;
 }
 
-std::tuple<edm4hep::TrackerHitCollection, edm4hep::TrackerHitSimTrackerHitLinkCollection> operator(const edm4hep::SimTrackerHitCollection& inputSim) const{
+std::tuple<edm4hep::TrackerHitCollection, edm4hep::TrackerHitSimTrackerHitLinkCollection> operator(const edm4hep::SimTrackerHitCollection& inputSim
+                                                                                                   const edm4hep::EventHeaderCollection& evHeader) const{
 
-    gsl_rng_set( m_rng, Global::EVENTSEEDER->getSeed(this) );
-    debug() << "seed set to " << Global::EVENTSEEDER->getSeed(this) << endmsg;
+    gsl_rng_set( m_rng, m_idGen->getUniqueID(evHeader.eventNumber()[0], evHeader.runNumber()[0], name()) );
+    
+    debug() << "seed set to " << m_idGen->getUniqueID(evHeader.eventNumber()[0], evHeader.runNumber()[0] << endmsg;
 
     unsigned nCreatedHits=0;
     unsigned nDismissedHits=0;

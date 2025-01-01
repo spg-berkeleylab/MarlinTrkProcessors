@@ -27,12 +27,13 @@ Steve Aplin 26 June 2009 (DESY)
 
 // k4FWCore & EDM4HEP
 #include <k4FWCore/Transformer.h>
+#include <k4Interface/IUniqueIDGenSvc.h>
 #include <edm4hep/TrackerHitSimTrackerHitLinkCollection.h>
 #include <edm4hep/MCParticle.h>
 #include <edm4hep/SimTrackerHit.h>
 #include <edm4hep/MutableTrackerHitPlane.h>
 #include <edm4hep/MutableTrackerHitSimTrackerHitLink.h>
-
+#include <edm4hep/EventCollectionHeader.h>
 
 #include <TH1.h>
 #include "DDRec/DetectorData.h"
@@ -93,7 +94,8 @@ class TPCModularEndplate;
 class DDTPCDigiAlgorithm : public k4FWCore::MultiTransformer<std::tuple<
 	edm4hep::TrackerHitPlaneColection,
 	edm4hep::TrackerHitSimTrackerHitLinkCollection>(
-	const std::vector<const edm4hep::SimTrackerHitCollection*> &)>{
+	const std::vector<const edm4hep::SimTrackerHitCollection*> &
+        const edm4hep::EventHeaderCollection&)>{
   
 public:
   
@@ -110,7 +112,8 @@ public:
    */
   std::tuple<edm4hep::TrackerHitPlaneColection,
              edm4hep::TrackerHitSimTrackerHitLinkCollection> operator(
-	     const std::vector<const edm4hep::SimTrackerHitCollection*>& inputCols) const; 
+	     const std::vector<const edm4hep::SimTrackerHitCollection*>& inputCols
+             const edm4hep::EventHeaderCollection& evHeader) const; 
   
   /** Called after data processing for clean up.
    */
@@ -142,6 +145,7 @@ protected:
 
   // gsl random number generator
   gsl_rng * m_random {};
+  SmartIF<IUniqueIDGenSvc> m_idGen;
 
   Gaudi::Property<float> m_pointResoRPhi0{this, "PointResolutionRPhi", (float)0.050, "R-Phi Resolution constant in TPC."}; // Coefficient for RPhi point res independant of drift length 
   Gaudi::Property<float> m_pointResoPadPhi{this, "PointResolutionPadPhi", (float)0.900, "Pad Phi Resolution constant in TPC."}; // Coefficient for the point res dependance on relative phi angle to the pad verticle 

@@ -3,9 +3,11 @@
 
 // k4FWCore & EDM4HEP
 #include <k4FWCore/Transformer.h>
+#include <k4Interface/IUniqueIDGenSvc.h>
 #include <edm4hep/SimTrackerHitCollection.h>
 #include <edm4hep/TrackerHitCollection.h>
 #include <edm4hep/TrackerHitSimTrackerHitLinkCollection.h>
+#include <edm4hep/EventHeaderCollection.h>
 
 // Standard
 #include <string>
@@ -50,7 +52,10 @@
  * @author F.Gaede CERN/DESY, S. Aplin DESY, S. Ferraro
  * @date Dec 2014
  */
-class DDPlanarDigiAlgorithm : public k4FWCore::MultiTransformer<std::tuple<edm4hep::TrackerHitCollection, edm4hep::TrackerHitSimTrackerHitLinkCollection>(const edm4hep::SimTrackerHitCollection&)> {
+class DDPlanarDigiAlgorithm : public k4FWCore::MultiTransformer<std::tuple<edm4hep::TrackerHitCollection, 
+                                                                           edm4hep::TrackerHitSimTrackerHitLinkCollection>(
+                                                                     const edm4hep::SimTrackerHitCollection&,
+                                                                     const edm4hep::EventHeaderCollection&)> {
 public:
   
   DDPlanarDigiAlgorithm(const std::string& name, ISvcLocator* svcLoc);
@@ -62,7 +67,8 @@ public:
   
   /** Called for every run.
    */
-  std::tuple<edm4hep::TrackerHitCollection, edm4hep::TrackerHitSimTrackerHitLinkCollection> operator(const edm4hep::SimTrackerHitCollection& inputSim) const; 
+  std::tuple<edm4hep::TrackerHitCollection, edm4hep::TrackerHitSimTrackerHitLinkCollection> operator(const edm4hep::SimTrackerHitCollection& inputSim
+                                                                                                     const edm4hep::EventHeaderCollection& evHeader) const; 
   
   /** Called after data processing for clean up.
    */
@@ -91,8 +97,9 @@ protected:
   Gaudi::Property<std::vector<float>> m_timeWindow_max{this, "TimeWindowMax", initMaxTime, "Maximum time a hit must have after smearing to be accepted [ns] - either one per layer or one for all layers."};
 
   
+  SmartIF<IUniqueIDGenSvc> m_idGen;
   gsl_rng* m_rng ;
-  
+
   const dd4hep::rec::SurfaceMap* m_map ;
 
   std::vector<TH1F*> m_h ;

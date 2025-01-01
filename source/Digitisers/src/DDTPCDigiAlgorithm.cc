@@ -48,10 +48,11 @@ DDTPCDigiAlgorithm::~DDTPCDigiAlgorithm(){
   delete m_tpcEP ;
 }
 
-DDTPCDigiAlgorithm::DDTPCDigiAlgorithm(const std::string& name, ISvcLocator* svcLoc) : MultiTransformer(name, svcLoc, {
-        KeyValues("TPCPadRowHitCollectionName", {"TPCCollection", "TPCSpacePointCollection", "TPCLowPtCollection"}))}, {
-        KeyValues("TPCTrackerHitsCol", {"TPCTrackerHits"}),
-        KeyValues("SimTrkHitRelCollection", {"TPCTrackerHitRelations"}) {}
+DDTPCDigiAlgorithm::DDTPCDigiAlgorithm(const std::string& name, ISvcLocator* svcLoc) : MultiTransformer(name, svcLoc,
+      { KeyValues("TPCPadRowHitCollectionName", {"TPCCollection", "TPCSpacePointCollection", "TPCLowPtCollection"}))
+        KeyValues("EventHeaderCollectionName", {"EventHeader"}) }, 
+      { KeyValues("TPCTrackerHitsCol", {"TPCTrackerHits"}),
+        KeyValues("SimTrkHitRelCollection", {"TPCTrackerHitRelations"}) } {}
 
 
 StatusCode DDTPCDigiProcessor::initialize() 
@@ -205,15 +206,16 @@ StatusCode DDTPCDigiProcessor::initialize()
   
   //intialise random number generator 
   m_random = gsl_rng_alloc(gsl_rng_ranlxs2);
-  marlin::Global::EVENTSEEDER->registerProcessor(this);
+  m_idGen = serviceLocator()->service("UniqueIDGenSvc");
 }
 
 std::tuple<edm4hep::TrackerHitPlaneColection,
              edm4hep::TrackerHitSimTrackerHitLinkCollection> operator(
-             const std::vector<const edm4hep::SimTrackerHitCollection*>& inputCols) const{
+             const std::vector<const edm4hep::SimTrackerHitCollection*>& inputCols
+             const edm4hep::EventHeaderCollection& evHeader) const{
   
-  gsl_rng_set( m_random, marlin::Global::EVENTSEEDER->getSeed(this) );
-  debug() << "seed set to " << marlin::Global::EVENTSEEDER->getSeed(this) << " for event number "<< evt->getEventNumber() << endmsg;
+  gsl_rng_set( m_random, m_idGen->getUniqueID(evHeader.eventNumber()[0], evHeader.runNumber()[0] );
+  debug() << "seed set to " << m_idGen->getUniqueID(evHeader.eventNumber()[0], evHeader.runNumber()[0] << " for event number "<< evHeader.eventNumber()[0] << endmsg;
 
    int numberOfVoxelsCreated(0);
   
