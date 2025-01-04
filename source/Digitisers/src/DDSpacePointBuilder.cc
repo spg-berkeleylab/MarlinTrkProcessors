@@ -19,6 +19,7 @@
 #include <cmath>
 #include <sstream>
 
+#include "BitField64.h"
 
 
 DECLARE_COMPONENT(DDSpacePointBuilder);
@@ -618,7 +619,7 @@ std::vector< int > DDSpacePointBuilder::getCellIDsAtBack( int cellID ){
   std::vector< int > back;
   
   //find out detector, layer
-  ACTSTracking::BitField64 cellIDer( "system:5,side:-2,layer:6,module:11,sensor:8" );
+  BitField64 cellIDer( "system:5,side:-2,layer:6,module:11,sensor:8" );
   cellIDer.setValue( cellID );
   
 
@@ -679,7 +680,7 @@ std::string DDSpacePointBuilder::getCellIDInfo( int cellID ){
   std::stringstream s;
   
   //find out layer, module, sensor
-  ACTSTracking::BitField64  cellIDer( "system:5,side:-2,layer:6,module:11,sensor:8" );
+  BitField64  cellIDer( "system:5,side:-2,layer:6,module:11,sensor:8" );
   cellIDer.setValue( cellID );
 
   int subdet = cellID[ "system" ] ;

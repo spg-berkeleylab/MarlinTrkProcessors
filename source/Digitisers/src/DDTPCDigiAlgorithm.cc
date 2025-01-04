@@ -23,6 +23,7 @@
 #include <stdexcept>
 #include "constants.h"
 #include "voxel.h"
+#include "BitField64.h"
 
 // EDM4HEP
 
@@ -916,7 +917,7 @@ void DDTPCDigiAlgorithm::writeVoxelToHit( Voxel_tpc* aVoxel, edm4hep::MutableTra
 //  
 //  if( pos[2] < 0.0 ) side = 1 ;
  
-  ACTSTracking::BitField64 bitField( "system:5,side:-2,layer:6,module:11,sensor:8" );
+  BitField64 bitField( "system:5,side:-2,layer:6,module:11,sensor:8" );
   bitField.setFieldValue("system", 4) ; //TODO: lcio::ILDDetID::TPC = 4...
   bitField.setFieldValue("layer", seed_hit->getRowIndex());
   bitField.setFieldValue("module", 0);
@@ -1074,7 +1075,7 @@ void DDTPCDigiAlgorithm::writeMergedVoxelsToHit( vector <Voxel_tpc*>* hitsToMerg
   int padIndex = padLayout.getNearestPad(mergedPoint->perp(),mergedPoint->phi());  
   int row = padLayout.getRowNumber(padIndex);  
  
-  ACTSTracking::BitField64 bitField( "system:5,side:-2,layer:6,module:11,sensor:8" );
+  BitField64 bitField( "system:5,side:-2,layer:6,module:11,sensor:8" );
   bitField.setFieldValue("system", 4) ; //TODO: lcio::ILDDetID::TPC = 4...
   bitField.setFieldValue("layer", row);
   bitField.setFieldValue("module", 0);
