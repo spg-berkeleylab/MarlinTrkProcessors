@@ -2,14 +2,16 @@
 #include "DDPlanarDigiAlgorithm.h"
 
 // EDM4HEP
-#include <edm4hep/MutableTrackerHitSimTrackerHitLink.h>
+#include "BitField64.hxx"
+#include <edm4hep/Vector2f.h>
+#include <edm4hep/MCParticle.h>
 #include <edm4hep/SimTrackerHit.h>
 #include <edm4hep/MutableTrackerHitPlane.h>
-#include <edm4hep/MCParticle.h>
-#include <edm4hep/Vector2f.h>
+#include <edm4hep/MutableTrackerHitSimTrackerHitLink.h>
 
-// ACTSTracking
-#include "ACTSTracking/CellIDDecoder.hxx"
+// Gaudi
+#include <GaudiKernel/ITHistSvc.h>
+#include "GaudiKernel/IRndmEngine.h"
 
 // DD4HEP
 #include "DD4hep/Detector.h"
@@ -17,27 +19,19 @@
 
 // Standard and ROOT
 #include <TMath.h>
-
-#include <gsl/gsl_rng.h>
-#include <gsl/gsl_randist.h>
-
 #include <cmath>
-#include <algorithm>
-#include <sstream>
-#include <iostream>
-#include <climits>
 #include <cfloat>
-
-// CLHEP
-#include "CLHEP/Vector/TwoVector.h"
+#include <sstream>
+#include <climits>
+#include <iostream>
+#include <algorithm>
 
 DECLARE_COMPONENT(DDPlanarDigiAlgorithm)
 
-DDPlanarDigiAlgorithm::DDPlanarDigiAlgorithm() : MultiTransformer(name, svcLoc,
-       { KeyValues("SimTrackHitCollectionName", {"VXDCollection"})
-         KeyValues("EventHeaderCollectionName", {"HeaderCollection"}) },
+DDPlanarDigiAlgorithm::DDPlanarDigiAlgorithm(const std::string& name, ISvcLocator* svcLoc) : MultiTransformer(name, svcLoc,
+       { KeyValues("SimTrackHitCollectionName", {"VXDCollection"}) },
        { KeyValues("TrackerHitCollectionName", {"VTXTrackerHits"}),
-	 KeyValues("SimTrkHitRelCollection", {"VTXTrackerHitRelations"}) }) {}
+         KeyValues("SimTrkHitRelCollection", {"VTXTrackerHitRelations"}) }) {}
 
 enum {
   hu = 0,
@@ -51,16 +45,20 @@ enum {
   hSize 
 } ;
 
-StatusCode DDPlanarDigiAlgorithm::initialize() { 
-  // initialize gsl random generator
-  m_rng = gsl_rng_alloc(gsl_rng_ranlxs2);
-  m_idGen = serviceLocator()->service("UniqueIDGenSvc");
+StatusCode DDPlanarDigiAlgorithm::initialize() {
+  MsgStream log(msgSvc(), name());
+  // Initialize random number gen
+  if ( (m_rng.initialize(randSvc(), Rndm::Gauss(0., 1.))).isFailure() ) {
+    log << MSG::ERROR << "Unable to initialize rng Gauss." << endmsg;
+    return StatusCode::FAILURE;
+  }
+
   m_h.resize( hSize );
   
   if( m_resU.size() !=  m_resV.size() ) {
-    error() << "Inconsistent number of resolutions given for U and V coordinate: " 
-	<< "ResolutionU  :" <<   m_resU.size() << " != ResolutionV : " <<  m_resV.size() 
-	<< endmsg;
+    log << MSG::ERROR << "Inconsistent number of resolutions given for U and V coordinate: " 
+        << "ResolutionU  :" <<   m_resU.size() << " != ResolutionV : " <<  m_resV.size() 
+        << endmsg;
     return StatusCode::FAILURE;
   }
 
@@ -76,20 +74,20 @@ StatusCode DDPlanarDigiAlgorithm::initialize() {
   m_map = surfMan.map( det.name() ) ;
 
   if( ! m_map ) {   
-    error() << "Could not find surface map for detector: " 
-	    << m_subDetName << " in SurfaceManager " << endmsg;
+    log << MSG::ERROR<< "Could not find surface map for detector: " 
+        << m_subDetName << " in SurfaceManager " << endmsg;
     return StatusCode::FAILURE;
   }
 
-  debug() << "DDPlanarDigiProcessor::init(): found " << m_map->size() 
-                          << " surfaces for detector:" <<  m_subDetName << endmsg;
+  log << MSG::DEBUG << "DDPlanarDigiProcessor::init(): found " << m_map->size() 
+      << " surfaces for detector:" <<  m_subDetName << endmsg;
 
-  message() << " *** DDPlanarDigiProcessor::init(): creating histograms" << endmsg;
+  log << MSG::INFO << " *** DDPlanarDigiProcessor::init(): creating histograms" << endmsg;
 
   ITHistSvc* histSvc{nullptr};
   StatusCode sc1 = service("THistSvc", histSvc);
   if ( sc1.isFailure() ) { 
-    error() << "Could not locate HistSvc" << endmsg;
+    log << MSG::ERROR << "Could not locate HistSvc" << endmsg;
     return StatusCode::FAILURE; 
   }
 
@@ -115,30 +113,36 @@ StatusCode DDPlanarDigiAlgorithm::initialize() {
   (void)histSvc->regHist("/histos/digi_planar/hitE", m_h[ hitE ]);
   (void)histSvc->regHist("/histos/digi_planar/hitsAccepted", m_h[ hitsAccepted ]);
   
-  geturn StatusCode::SUCCESS;
+  return StatusCode::SUCCESS;
 }
 
-std::tuple<edm4hep::TrackerHitCollection, edm4hep::TrackerHitSimTrackerHitLinkCollection> operator(const edm4hep::SimTrackerHitCollection& inputSim
-                                                                                                   const edm4hep::EventHeaderCollection& evHeader) const{
-
-    gsl_rng_set( m_rng, m_idGen->getUniqueID(evHeader.eventNumber()[0], evHeader.runNumber()[0], name()) );
-    
-    debug() << "seed set to " << m_idGen->getUniqueID(evHeader.eventNumber()[0], evHeader.runNumber()[0] << endmsg;
+std::tuple<edm4hep::TrackerHitPlaneCollection, 
+           edm4hep::TrackerHitSimTrackerHitLinkCollection> DDPlanarDigiAlgorithm::operator()(
+     const edm4hep::SimTrackerHitCollection& inputSim) const{
+    MsgStream log(msgSvc(), name());
+   
+    std::vector<long> seeds;
+    (void)randSvc().get()->engine()->seeds(seeds);
+    log << MSG::DEBUG << "seed set to ";
+    for (long seed : seeds) {
+      log << MSG::DEBUG << seed;
+    }
+    log << MSG::DEBUG << endmsg;
 
     unsigned nCreatedHits=0;
     unsigned nDismissedHits=0;
     
-    edm4hep::TrackerHitPlaneCollection trkhitVec;
+    edm4hep::TrackerHitPlaneCollection trkhitCol;
 
     // Relation collection TrackerHit, SimTrackerHit
     edm4hep::TrackerHitSimTrackerHitLinkCollection relCollection;
 
-    ACTSTracking::CellIDDecoder cellid_decoder( "system:5,side:-2,layer:6,module:11,sensor:8" );
+    BitField64 cellid_decoder( "system:5,side:-2,layer:6,module:11,sensor:8" );
 
 
     int nSimHits = inputSim.size();
     
-    debug() << " processing collection with " <<  nSimHits  << " hits ... " << endmsg;
+    log << MSG::DEBUG << " processing collection with " <<  nSimHits  << " hits ... " << endmsg;
     
     for(int i=0; i< nSimHits; ++i){
 
@@ -146,8 +150,8 @@ std::tuple<edm4hep::TrackerHitCollection, edm4hep::TrackerHitSimTrackerHitLinkCo
 
       m_h[hitE]->Fill( simTHit.getEDep() * (dd4hep::GeV / dd4hep::keV) );
 
-      if( simTHit->getEDep() < m_minEnergy ) {
-        debug() << "Hit with insufficient energy " << simTHit.getEDep() * (dd4hep::GeV / dd4hep::keV) << " keV" << endmsg;
+      if( simTHit.getEDep() < m_minEnergy ) {
+        log << MSG::DEBUG << "Hit with insufficient energy " << simTHit.getEDep() * (dd4hep::GeV / dd4hep::keV) << " keV" << endmsg;
         continue;
       }
       
@@ -160,18 +164,16 @@ std::tuple<edm4hep::TrackerHitCollection, edm4hep::TrackerHitSimTrackerHitLinkCo
       dd4hep::rec::SurfaceMap::const_iterator sI = m_map->find( cellID ) ;
 
       if( sI == m_map->end() ){
-	cellid_decoder.setValue(simTHit.getCellID());
-        error() << " DDPlanarDigiProcessor::processEvent(): no surface found for cellID : " 
-                 <<   cellid_decoder.fieldDescription() << endmsg; 
-        error() << " DDPlanarDigiProcessor::processEvent(): no surface found for cellID : " 
-                                    <<   cellid_decoder.fieldDescription();
-        throw Exception("No surface found for cellID.");
+        cellid_decoder.setValue(simTHit.getCellID());
+        log << MSG::ERROR << " DDPlanarDigiProcessor::processEvent(): no surface found for cellID : " 
+            <<   cellid_decoder.fieldDescription() << endmsg;
+	continue;
       }
 
 
       const dd4hep::rec::ISurface* surf = sI->second;
       cellid_decoder.setValue(simTHit.getCellID());
-      int layer  = cellid_decoder("layer").value();
+      int layer  = cellid_decoder["layer"];
 
 
       dd4hep::rec::Vector3D oldPos( simTHit.getPosition().x, simTHit.getPosition().y, simTHit.getPosition().z );
@@ -182,29 +184,26 @@ std::tuple<edm4hep::TrackerHitCollection, edm4hep::TrackerHitSimTrackerHitLinkCo
       //************************************************************
       
       if ( ! surf->insideBounds( dd4hep::mm * oldPos ) ) {
-       	cellid_decoder.setValue(simTHit.getCellID()); 
-	debug() << "  hit at " << oldPos 
-                << " " << cellid_decoder.fieldDescription() 
-                << " is not on surface "
-                << *surf
-                << " distance: " << surf->distance(  dd4hep::mm * oldPos )
-                << endmsg;
+        cellid_decoder.setValue(simTHit.getCellID()); 
+        log << MSG::DEBUG << "  hit at " << oldPos 
+            << " " << cellid_decoder.fieldDescription() 
+            << " is not on surface "
+            << *surf
+            << " distance: " << surf->distance(  dd4hep::mm * oldPos )
+            << endmsg;
         
         if( m_forceHitsOntoSurface ){
           
           dd4hep::rec::Vector2D lv = surf->globalToLocal( dd4hep::mm * oldPos  ) ;
-          
           dd4hep::rec::Vector3D oldPosOnSurf = (1./dd4hep::mm) * surf->localToGlobal( lv ) ; 
           
-          debug() << " moved to " << oldPosOnSurf << " distance " << (oldPosOnSurf-oldPos).r()
-                  << endmsg;        
+          log << MSG::DEBUG << " moved to " << oldPosOnSurf << " distance "
+              << (oldPosOnSurf-oldPos).r() << endmsg;        
           
           oldPos = oldPosOnSurf;
 
         } else {
-
           ++nDismissedHits;
-        
           continue; 
         }
       }
@@ -216,29 +215,32 @@ std::tuple<edm4hep::TrackerHitCollection, edm4hep::TrackerHitSimTrackerHitLinkCo
       float hitT = simTHit.getTime();
       
       // Smearing time of the hit
-      if (m_resT.size() and m_resT[0] > 0.0) {
-        float resT = m_resT.size() > 1 ? m_resT.at(layer) : m_resT.at(0);
-        float tSmear = resT > 0.0 ? gsl_ran_gaussian( m_rng, resT ) : 0.0;
+      if (m_resT.value().size() and m_resT.value()[0] > 0.0) {
+        float resT = m_resT.value().size() > 1 ? m_resT.value().at(layer) : m_resT.value().at(0);
+        float tSmear = resT > 0.0 ? ( m_rng.shoot() *resT ) : 0.0;
         m_h[hT]->Fill( resT > 0.0 ? tSmear / resT : 0.0 );
         m_h[diffT]->Fill( tSmear );
 
         hitT += tSmear;
-        debug() << "smeared hit at T: " << simTHit.getTime() << " ns to T: " << hitT << " ns according to resolution: " << resT << " ns" << endmsg;
+        log << MSG::DEBUG << "smeared hit at T: " << simTHit.getTime() << " ns to T: " << hitT
+            << " ns according to resolution: " << resT << " ns" << endmsg;
       }
      
       // Correcting for the propagation time
       if (m_correctTimesForPropagation) {
         double dt = oldPos.r() / ( TMath::C() / 1e6 );
         hitT -= dt;
-        debug() << "corrected hit at R: " << oldPos.r() << " mm by propagation time: " << dt << " ns to T: " << hitT << " ns" << endmsg;
+        log << MSG::DEBUG << "corrected hit at R: " << oldPos.r() << " mm by propagation time: "
+            << dt << " ns to T: " << hitT << " ns" << endmsg;
       }
       
       // Skipping the hit if its time is outside the acceptance time window
       if (m_useTimeWindow) {
-        float timeWindow_min = m_timeWindow_min.size() > 1 ? m_timeWindow_min.at(layer) : m_timeWindow_min.at(0);
-        float timeWindow_max = m_timeWindow_max.size() > 1 ? m_timeWindow_max.at(layer) : m_timeWindow_max.at(0);
+        float timeWindow_min = m_timeWindow_min.value().size() > 1 ? m_timeWindow_min.value().at(layer) : m_timeWindow_min.value().at(0);
+        float timeWindow_max = m_timeWindow_max.value().size() > 1 ? m_timeWindow_max.value().at(layer) : m_timeWindow_max.value().at(0);
         if ( hitT < timeWindow_min || hitT > timeWindow_max ) {
-          debug() << "hit at T: " << simTHit.getTime() << " smeared to: " << hitT << " is outside the time window: hit dropped"  << endmsg;
+          log << MSG::DEBUG << "hit at T: " << simTHit.getTime() << " smeared to: "
+              << hitT << " is outside the time window: hit dropped"  << endmsg;
           ++nDismissedHits;
           continue;
         }
@@ -262,19 +264,19 @@ std::tuple<edm4hep::TrackerHitCollection, edm4hep::TrackerHitSimTrackerHitLinkCo
       unsigned  tries   =  0 ;              
       static const unsigned MaxTries = 10 ; 
       
-      float resU = ( m_resU.size() > 1 ?   m_resU.at(  layer )     : m_resU.at(0)   )  ;
-      float resV = ( m_resV.size() > 1 ?   m_resV.at(  layer )     : m_resV.at(0)   )  ; 
+      float resU = ( m_resU.value().size() > 1 ?  m_resU.value().at(  layer )  : m_resU.value().at(0)  ) ;
+      float resV = ( m_resV.value().size() > 1 ?  m_resV.value().at(  layer )  : m_resV.value().at(0)  ) ; 
 
 
       while( tries < MaxTries ) {
         
         if( tries > 0 ) {
-	  cellid_decoder.setValue(simTHit.getCellID());
-          debug() << "retry smearing for " <<  cellid_decoder.fieldDescription() << " : retries " << tries << endmsg;
+          cellid_decoder.setValue(simTHit.getCellID());
+          log << MSG::DEBUG << "retry smearing for " <<  cellid_decoder.fieldDescription() << " : retries " << tries << endmsg;
         }
 
-        double uSmear  = gsl_ran_gaussian( m_rng, resU ) ;
-        double vSmear  = gsl_ran_gaussian( m_rng, resV ) ;
+        double uSmear = m_rng.shoot() *resU ;
+        double vSmear = m_rng.shoot() *resV ;
 
         
         // dd4hep::rec::Vector3D newPosTmp = oldPos +  uSmear * u ;  
@@ -291,22 +293,19 @@ std::tuple<edm4hep::TrackerHitCollection, edm4hep::TrackerHitSimTrackerHitLinkCo
                 xStripPos = simHitPosSmeared[0] + lineParam*v[0];
                 yStripPos = simHitPosSmeared[1] + lineParam*v[1];
                 newPosTmp = dd4hep::rec::Vector3D(xStripPos, yStripPos, zStripPos);    
-            }
-            else{
+            } else {
                 newPosTmp = (1./dd4hep::mm) * ( surf->localToGlobal( dd4hep::rec::Vector2D( (uL+uSmear)*dd4hep::mm, 0. ) ) );    
             }
-        }
-        else{
+        } else {
             newPosTmp = (1./dd4hep::mm) * ( surf->localToGlobal( dd4hep::rec::Vector2D( (uL+uSmear)*dd4hep::mm, (vL+vSmear)*dd4hep::mm ) ) );
         }
 
-        debug() << " hit at    : " << oldPos 
-                << " smeared to: " << newPosTmp
-                << " uL: " << uL 
-                << " vL: " << vL                 
-                << " uSmear: " << uSmear
-                << " vSmear: " << vSmear
-                << endmsg;
+        log << MSG::DEBUG << " hit at    : " << oldPos
+            << " smeared to: " << newPosTmp
+            << " uL: "         << uL
+            << " vL: "         << vL
+            << " uSmear: "     << uSmear
+            << " vSmear: "     << vSmear << endmsg;
 
 
         if ( surf->insideBounds( dd4hep::mm * newPosTmp ) ) {    
@@ -324,18 +323,18 @@ std::tuple<edm4hep::TrackerHitCollection, edm4hep::TrackerHitSimTrackerHitLinkCo
 
         } else { 
           cellid_decoder.setValue(simTHit.getCellID());
-          debug() << "  hit at " << newPosTmp 
-                  << " " << cellid_decoder.fieldDescription() 
-                  << " is not on surface "                  
-                  << " distance: " << surf->distance( dd4hep::mm * newPosTmp ) 
-                  << endmsg;
+          log << MSG::DEBUG << "  hit at " << newPosTmp 
+              << " " << cellid_decoder.fieldDescription() 
+              << " is not on surface "                  
+              << " distance: " << surf->distance( dd4hep::mm * newPosTmp ) 
+              << endmsg;
         }
         
         ++tries;
       }
       
       if( accept_hit == false ) {
-        debug() << "hit could not be smeared within ladder after " << MaxTries << "  tries: hit dropped"  << endmsg;
+        log << MSG::DEBUG << "hit could not be smeared within ladder after " << MaxTries << "  tries: hit dropped"  << endmsg;
         ++nDismissedHits;
         continue; 
       } 
@@ -345,15 +344,15 @@ std::tuple<edm4hep::TrackerHitCollection, edm4hep::TrackerHitSimTrackerHitLinkCo
       //**************************************************************************
       
 
-      edm4hep::MutableTrackerHitPlane* trkHit = new edm4hep::MutableTrackerHitPlane();
+      edm4hep::MutableTrackerHitPlane trkHit = trkhitCol.create();
                   
       //const int cellID1 = simTHit.getCellID1();
-      trkHit->setCellID( cellID );
+      trkHit.setCellID( cellID );
       //trkHit->setCellID1( cellID1 );
       
-      trkHit->setPosition( newPos.const_array() );
-      trkHit->setTime( hitT );
-      trkHit->setEDep( simTHit.getEDep() );
+      trkHit.setPosition( newPos.const_array() );
+      trkHit.setTime( hitT );
+      trkHit.setEDep( simTHit.getEDep() );
 
       edm4hep::Vector2f u_direction;
       u_direction.a = u.theta();
@@ -363,28 +362,28 @@ std::tuple<edm4hep::TrackerHitCollection, edm4hep::TrackerHitSimTrackerHitLinkCo
       v_direction.a = v.theta();
       v_direction.b = v.phi();
       
-      debug()  << " U[0] = "<< u_direction.a << " U[1] = "<< u_direction.b 
-               << " V[0] = "<< v_direction.a << " V[1] = "<< v_direction.b
-               << endmsg;
+      log << MSG::DEBUG << " U[0] = "<< u_direction.a << " U[1] = "<< u_direction.b 
+                        << " V[0] = "<< v_direction.a << " V[1] = "<< v_direction.b
+                        << endmsg;
 
-      trkHit->setU( u_direction );
-      trkHit->setV( v_direction );
+      trkHit.setU( u_direction );
+      trkHit.setV( v_direction );
       
-      trkHit->setdU( resU );
+      trkHit.setDu( resU );
 
       if( m_isStrip ) {
 
         // store the resolution from the length of the wafer - in case a fitter might want to treat this as 2d hit ....
         double stripRes = (surf->length_along_v() / dd4hep::mm ) / std::sqrt( 12. );
-        trkHit->setdV( stripRes ); 
+        trkHit.setDv( stripRes ); 
 
       } else {
-        trkHit->setdV( resV );
+        trkHit.setDv( resV );
       }
 
       if( m_isStrip ){
-	///TODO: UTIL::ILDTrkHitTrpyBit::ONEDIMENSIONAL = 29, couldn't find in edm4hep
-        trkHit->setType( edm4hep::utils::setBit( trkHit->getType() ,  29, true ) );
+        ///TODO: UTIL::ILDTrkHitTrpyBit::ONEDIMENSIONAL = 29, couldn't find in edm4hep
+        trkHit.setType( edm4hep::utils::setBit( trkHit.getType() ,  29, true ) );
       }
 
       //**************************************************************************
@@ -392,19 +391,13 @@ std::tuple<edm4hep::TrackerHitCollection, edm4hep::TrackerHitSimTrackerHitLinkCo
       //**************************************************************************    
 
       // Set relation with LCRelationNavigator
-      edm4hep::TrackerHitSimTrackerHitPlane rel = relCollection.create();
+      edm4hep::MutableTrackerHitSimTrackerHitLink rel = relCollection.create();
       rel.setFrom(trkHit);
       rel.setTo(simTHit);
       
-      //**************************************************************************
-      // Add hit to collection
-      //**************************************************************************    
-      
-      trkhitVec.push_back( *trkHit ) ; 
-      
       ++nCreatedHits;
       
-      debug() << "-------------------------------------------------------" << endmsg;
+      log << MSG::DEBUG << "-------------------------------------------------------" << endmsg;
       
     }
     
@@ -416,14 +409,12 @@ std::tuple<edm4hep::TrackerHitCollection, edm4hep::TrackerHitSimTrackerHitLinkCo
     // Add collection to event
     //**************************************************************************    
         
-    debug() << "Created " << nCreatedHits << " hits, " << nDismissedHits << " hits  dismissed\n" << endmsg;
+    log << MSG::DEBUG << "Created " << nCreatedHits << " hits, " << nDismissedHits << " hits  dismissed\n" << endmsg;
 
-    return std::make_tuple(std::move(trkhitVec), std::move(relCollection)); 
+    return std::make_tuple(std::move(trkhitCol), std::move(relCollection)); 
 }
 
 
 StatusCode DDPlanarDigiAlgorithm::finalize(){ 
-  gsl_rng_free( m_rng );
-  
   return StatusCode::SUCCESS;
 }
