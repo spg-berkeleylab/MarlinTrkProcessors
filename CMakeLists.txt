@@ -23,8 +23,7 @@ gaudi_add_module(k4TrkAlgorithmsPlugins
                         	ROOT::Hist
                         	${ROOT_LIBRARIES}
                         	DD4hep::DDCore
-                        	k4FWCore::k4FWCore
-                                ${CLHEP_LIBRARIES})
+                        	k4FWCore::k4FWCore)
 
 INSTALL( TARGETS k4TrkAlgorithmsPlugins
          EXPORT ${CMAKE_PROJECT_NAME}TARGETS
