@@ -2,7 +2,6 @@
 #include "DDPlanarDigiAlgorithm.h"
 
 // EDM4HEP
-#include "BitField64.hxx"
 #include <edm4hep/Vector2f.h>
 #include <edm4hep/MCParticle.h>
 #include <edm4hep/SimTrackerHit.h>
@@ -15,6 +14,7 @@
 
 // DD4HEP
 #include "DD4hep/Detector.h"
+#include "DDSegmentation/BitFieldCoder.h"
 #include "DD4hep/DD4hepUnits.h"
 
 // Standard and ROOT
@@ -31,7 +31,10 @@ DECLARE_COMPONENT(DDPlanarDigiAlgorithm)
 DDPlanarDigiAlgorithm::DDPlanarDigiAlgorithm(const std::string& name, ISvcLocator* svcLoc) : MultiTransformer(name, svcLoc,
        { KeyValues("SimTrackHitCollectionName", {"VXDCollection"}) },
        { KeyValues("TrackerHitCollectionName", {"VTXTrackerHits"}),
-         KeyValues("SimTrkHitRelCollection", {"VTXTrackerHitRelations"}) }) {}
+         KeyValues("SimTrkHitRelCollection", {"VTXTrackerHitRelations"}) }) 
+{
+  m_geoSvc = serviceLocator()->service("GeoSvc");  // important to initialize m_geoSvc
+}
 
 enum {
   hu = 0,
@@ -84,12 +87,8 @@ StatusCode DDPlanarDigiAlgorithm::initialize() {
 
   log << MSG::INFO << " *** DDPlanarDigiProcessor::init(): creating histograms" << endmsg;
 
-  ITHistSvc* histSvc{nullptr};
-  StatusCode sc1 = service("THistSvc", histSvc);
-  if ( sc1.isFailure() ) { 
-    log << MSG::ERROR << "Could not locate HistSvc" << endmsg;
-    return StatusCode::FAILURE; 
-  }
+  SmartIF<ITHistSvc> histSvc;
+  histSvc = serviceLocator()->service("HistSvc");
 
   m_h[ hu ] = new TH1F( "hu" , "smearing u" , 50, -5. , +5. );
   m_h[ hv ] = new TH1F( "hv" , "smearing v" , 50, -5. , +5. );
@@ -136,9 +135,10 @@ std::tuple<edm4hep::TrackerHitPlaneCollection,
 
     // Relation collection TrackerHit, SimTrackerHit
     edm4hep::TrackerHitSimTrackerHitLinkCollection relCollection;
-
-    BitField64 cellid_decoder( "system:5,side:-2,layer:6,module:11,sensor:8" );
-
+    
+    std::string initString;  
+    initString = m_geoSvc->constantAsString(m_encodingStringVariable.value());
+    dd4hep::DDSegmentation::BitFieldCoder cellid_decoder(initString); 
 
     int nSimHits = inputSim.size();
     
@@ -164,17 +164,13 @@ std::tuple<edm4hep::TrackerHitPlaneCollection,
       dd4hep::rec::SurfaceMap::const_iterator sI = m_map->find( cellID ) ;
 
       if( sI == m_map->end() ){
-        cellid_decoder.setValue(simTHit.getCellID());
         log << MSG::ERROR << " DDPlanarDigiProcessor::processEvent(): no surface found for cellID : " 
-            <<   cellid_decoder.fieldDescription() << endmsg;
-	continue;
+            <<   cellid_decoder.fieldDescription() << "\n" << cellid_decoder.valueString(simTHit.getCellID()) << endmsg;
+	      continue;
       }
 
-
       const dd4hep::rec::ISurface* surf = sI->second;
-      cellid_decoder.setValue(simTHit.getCellID());
-      int layer  = cellid_decoder["layer"];
-
+      int layer  = cellid_decoder.get(simTHit.getCellID(), "layer");
 
       dd4hep::rec::Vector3D oldPos( simTHit.getPosition().x, simTHit.getPosition().y, simTHit.getPosition().z );
       dd4hep::rec::Vector3D newPos;
@@ -184,9 +180,8 @@ std::tuple<edm4hep::TrackerHitPlaneCollection,
       //************************************************************
       
       if ( ! surf->insideBounds( dd4hep::mm * oldPos ) ) {
-        cellid_decoder.setValue(simTHit.getCellID()); 
         log << MSG::DEBUG << "  hit at " << oldPos 
-            << " " << cellid_decoder.fieldDescription() 
+            << " " << cellid_decoder.fieldDescription() << "\n" << cellid_decoder.valueString(simTHit.getCellID())
             << " is not on surface "
             << *surf
             << " distance: " << surf->distance(  dd4hep::mm * oldPos )
@@ -271,8 +266,7 @@ std::tuple<edm4hep::TrackerHitPlaneCollection,
       while( tries < MaxTries ) {
         
         if( tries > 0 ) {
-          cellid_decoder.setValue(simTHit.getCellID());
-          log << MSG::DEBUG << "retry smearing for " <<  cellid_decoder.fieldDescription() << " : retries " << tries << endmsg;
+          log << MSG::DEBUG << "retry smearing for " <<  cellid_decoder.fieldDescription() << "\n" << cellid_decoder.valueString(simTHit.getCellID()) << " : retries " << tries << endmsg;
         }
 
         double uSmear = m_rng.shoot() *resU ;
@@ -322,9 +316,8 @@ std::tuple<edm4hep::TrackerHitPlaneCollection,
           break;  
 
         } else { 
-          cellid_decoder.setValue(simTHit.getCellID());
           log << MSG::DEBUG << "  hit at " << newPosTmp 
-              << " " << cellid_decoder.fieldDescription() 
+              << " " << cellid_decoder.fieldDescription() << "\n" << cellid_decoder.valueString(simTHit.getCellID()) 
               << " is not on surface "                  
               << " distance: " << surf->distance( dd4hep::mm * newPosTmp ) 
               << endmsg;
