@@ -88,7 +88,7 @@ StatusCode DDPlanarDigiAlgorithm::initialize() {
   log << MSG::INFO << " *** DDPlanarDigiProcessor::init(): creating histograms" << endmsg;
 
   SmartIF<ITHistSvc> histSvc;
-  histSvc = serviceLocator()->service("HistSvc");
+  histSvc = serviceLocator()->service("THistSvc");
 
   m_h[ hu ] = new TH1F( "hu" , "smearing u" , 50, -5. , +5. );
   m_h[ hv ] = new TH1F( "hv" , "smearing v" , 50, -5. , +5. );
